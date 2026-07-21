@@ -10,7 +10,7 @@ import {
   applyImport, newId,
 } from './storage.js';
 import {
-  formatCents, toCents, evenSplit, normalizeSplit, isEvenSplit, proportionalSplit,
+  formatCents, toCents, evenSplit, normalizeSplit, isEvenSplit, proportionalSplit, rebalanceSplit,
   receiptSummary, monthSummary, itemsTotal, receiptMonth,
 } from './receipt.js';
 import {
@@ -196,6 +196,7 @@ function finalizeReceipt() {
     }
   }
   r.items.forEach((i) => { i.touched = false; });
+  delete r.editBackup; // Speichern macht die Sicherungskopie überflüssig
   persistReceipts();
   log('bon', 'finalized', { items: r.items.length, store: r.store, wasFinal: !!r.wasFinal });
   state.screen = 'summary';
@@ -205,10 +206,30 @@ function finalizeReceipt() {
 function reopenReceipt() {
   const r = currentReceipt();
   if (!r) return;
+  // Sicherungskopie für „Verwerfen" — überlebt auch einen App-Neustart mitten
+  // in der Bearbeitung. apiCost/attachmentCount bleiben bewusst außen vor
+  // (ausgegebenes Guthaben und angehängte Originale sind nicht rückholbar).
+  r.editBackup = JSON.parse(JSON.stringify({
+    store: r.store, date: r.date, totalCents: r.totalCents, notes: r.notes, items: r.items,
+  }));
   r.status = 'draft';
   r.wasFinal = true; // UI zeigt dann „Änderungen speichern" statt „Abschließen"
   persistReceipts();
   state.screen = 'review';
+}
+
+function discardChanges() {
+  const r = currentReceipt();
+  if (!r || !r.editBackup) return;
+  confirmAction('Änderungen verwerfen? Der Bon bleibt, wie er vor der Bearbeitung war.', () => {
+    Object.assign(r, JSON.parse(JSON.stringify(r.editBackup)));
+    delete r.editBackup;
+    r.status = 'final';
+    persistReceipts();
+    log('bon', 'edit discarded', { store: r.store });
+    state.screen = 'summary';
+    toast('Änderungen verworfen');
+  });
 }
 
 // Preis-Eingabe: die UI hält den Rohtext (priceInput), Cents werden daraus geparst.
@@ -229,7 +250,8 @@ function setQuickSplit(item, mode) {
   else {
     state.splitEditor = {
       itemId: item.id,
-      pcts: Object.fromEntries(pids.map((pid) => [pid, item.split[pid] ?? 0])),
+      // beim Öffnen auf Summe 100 normalisieren, damit die Regler stimmig stehen
+      pcts: proportionalSplit(item.split, pids),
     };
     return;
   }
@@ -254,8 +276,17 @@ function splitLabel(item) {
     .map((pid) => `${personName(pid)} ${item.split[pid]}%`).join(' / ');
 }
 
-// Slider-Werte dürfen in beliebiger Summe stehen — beim Übernehmen wird
-// proportional auf exakt 100 % skaliert (Vorschau zeigt das Ergebnis live).
+// Ein Regler wird bewegt → die übrigen gleichen sich sofort sichtbar ab, sodass
+// die Summe immer exakt 100 % ist (bei 2 Personen springt der andere direkt
+// auf das Komplement). Rechnung liegt in receipt.js (rebalanceSplit).
+function onSplitSlider(pid, ev) {
+  const ed = state.splitEditor;
+  if (!ed) return;
+  ed.pcts = rebalanceSplit(ed.pcts, pid, ev.target.value, personIds());
+}
+
+// Sicherheitsnetz beim Übernehmen: skaliert auf exakt 100 % (nach
+// rebalanceSplit normalerweise schon der Fall).
 function editorResult() {
   return proportionalSplit(state.splitEditor?.pcts || {}, personIds());
 }
@@ -874,7 +905,7 @@ const app = createApp({
       addManualReceipt, onFilePicked, confirmAnalyze, openReceipt, deleteReceipt,
       openOriginals, openPdf,
       addItem, removeItem, onPriceInput, onTotalInput, setQuickSplit, splitMode, splitLabel,
-      applySplitEditor, editorResult, setKind, finalizeReceipt, reopenReceipt,
+      applySplitEditor, editorResult, onSplitSlider, setKind, finalizeReceipt, reopenReceipt, discardChanges,
       addPerson, removePerson,
       summaryFor, copySummary, summaryToTSV, shiftMonth,
       sendChat, toggleVoice,
@@ -1026,6 +1057,7 @@ const app = createApp({
 
       <div class="review-actions">
         <button class="btn btn-danger-ghost" @click="deleteReceipt(receipt)">Löschen</button>
+        <button v-if="receipt.wasFinal && receipt.editBackup" class="btn btn-ghost" @click="discardChanges">Verwerfen</button>
         <button class="btn btn-primary btn-big" @click="finalizeReceipt"><span v-html="ic('check', 20)"></span> {{ receipt.wasFinal ? 'Änderungen speichern' : 'Abschließen & auswerten' }}</button>
       </div>
       <div class="save-hint"><span v-html="ic('info', 15)"></span> Speichern und Auswerten sind kostenlos — alles passiert lokal auf dem Gerät. Nur „Neu analysieren" ruft die KI auf.</div>
@@ -1303,12 +1335,12 @@ const app = createApp({
       <div class="modal">
         <h3>Aufteilung in Prozent</h3>
         <div v-for="p in state.settings.persons" :key="p.id" class="split-slider-row">
-          <div class="ssr-head"><span>{{ p.name }}</span><b>{{ editorResult()[p.id] }} %</b></div>
-          <input type="range" min="0" max="100" step="5" v-model.number="state.splitEditor.pcts[p.id]">
+          <div class="ssr-head"><span>{{ p.name }}</span><b>{{ state.splitEditor.pcts[p.id] }} %</b></div>
+          <input type="range" min="0" max="100" step="5" :value="state.splitEditor.pcts[p.id]" @input="onSplitSlider(p.id, $event)">
         </div>
         <div class="split-preview">
           {{ state.settings.persons.filter((p) => editorResult()[p.id] > 0).map((p) => p.name + ' ' + editorResult()[p.id] + ' %').join(' / ') }}
-          <div class="hint" style="margin-top:4px">Die Regler werden automatisch auf zusammen 100 % skaliert.</div>
+          <div class="hint" style="margin-top:4px">Die übrigen Regler gleichen sich automatisch ab — zusammen immer 100 %.</div>
         </div>
         <div class="modal-actions">
           <button class="btn btn-ghost" @click="state.splitEditor = null">Abbrechen</button>
@@ -1364,6 +1396,7 @@ if (['localhost', '127.0.0.1'].includes(location.hostname)) {
     state,
     newDraft,
     finalizeReceipt,
+    reopenReceipt,
     buildDraftFromAnalysis,
     applyAssistantAction,
     attachments: { saveAttachments, getAttachments, getAllAttachments },

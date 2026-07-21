@@ -88,6 +88,37 @@ test.describe('Bon-Workflow (manuell)', () => {
     await expect(page.locator('.cat-items')).toContainText('Blumenstrauß');
   });
 
+  test('Verwerfen stellt den Bon beim Bearbeiten unverändert wieder her', async ({ page }) => {
+    await gotoApp(page);
+    await seedReceipt(page, {
+      store: 'REWE',
+      items: [item({ name: 'Brot', priceCents: 300, priceInput: '3,00' })],
+    });
+    await page.locator('.review-actions .btn-primary').click();
+    await page.waitForSelector('.screen.summary');
+
+    // Bearbeiten öffnen: Verwerfen-Button ist da (bei neuen Entwürfen nicht)
+    await page.locator('.sum-actions .btn', { hasText: 'Bearbeiten' }).click();
+    await page.waitForSelector('.screen.review');
+    const discard = page.locator('.review-actions .btn', { hasText: 'Verwerfen' });
+    await expect(discard).toBeVisible();
+
+    // Preis ändern, dann verwerfen (mit Bestätigung)
+    await page.locator('.item-price').first().fill('9,99');
+    await page.locator('.item-price').first().dispatchEvent('change');
+    await discard.click();
+    await page.locator('.modal .btn-danger').click();
+
+    // Zurück in der Auswertung mit dem ALTEN Stand, Bon wieder final
+    await page.waitForSelector('.screen.summary');
+    await expect(page.locator('.sum-total')).toHaveText('3,00 €');
+    const status = await page.evaluate(() => {
+      const r = window.__gs.state.receipts[0];
+      return { status: r.status, backup: 'editBackup' in r };
+    });
+    expect(status).toEqual({ status: 'final', backup: false });
+  });
+
   test('Differenz-Warnung bei abweichendem Gesamtbetrag', async ({ page }) => {
     await gotoApp(page);
     await seedReceipt(page, {
@@ -151,10 +182,18 @@ test.describe('Mehrere Personen', () => {
     await expect(btns.nth(2)).toHaveText('Lisa');
     await expect(btns.nth(3)).toHaveText('teilen');
 
-    // %-Editor hat einen Slider je Person und skaliert auf 100
+    // %-Editor hat einen Slider je Person; bewegt man einen, gleichen sich die
+    // übrigen sofort SICHTBAR ab (Summe immer 100)
     await btns.nth(4).click();
     await expect(page.locator('.split-slider-row')).toHaveCount(3);
-    await page.evaluate(() => { window.__gs.state.splitEditor.pcts = { p1: 50, p2: 30, p3_test: 0 }; });
+    await page.locator('.split-slider-row input').first().evaluate((el) => {
+      el.value = '20';
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await expect(page.locator('.split-slider-row .ssr-head b').first()).toHaveText('20 %');
+    const sliderVals = await page.locator('.split-slider-row input').evaluateAll((els) => els.map((el) => Number(el.value)));
+    expect(sliderVals[0]).toBe(20);
+    expect(sliderVals[1] + sliderVals[2]).toBe(80);
     await page.locator('.modal .btn-primary').click();
 
     // Auswertung hat drei Personen-Spalten

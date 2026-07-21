@@ -1,0 +1,2 @@
+Bearbeiten ohne Risiko: beim Bearbeiten eines ausgewerteten Bons gibt es jetzt „Verwerfen" — der Bon springt unverändert zur Auswertung zurück
+Prozent-Editor: bewegt man einen Regler, gleichen sich die übrigen sofort sichtbar ab (zusammen immer 100 %)

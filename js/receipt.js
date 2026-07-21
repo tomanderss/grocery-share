@@ -87,6 +87,31 @@ export function proportionalSplit(raw, personIds) {
   return out;
 }
 
+// Slider-Bewegung im Prozent-Editor: eine Person wird auf `value` gesetzt, die
+// ÜBRIGEN teilen sich den Rest zu 100 proportional zu ihren bisherigen Werten
+// (standen alle Übrigen auf 0, gleichmäßig). So summieren die Regler nach jeder
+// Bewegung sichtbar auf exakt 100 % — bei 2 Personen springt der andere Regler
+// direkt auf das Komplement (20 → 80). Rundung per größtem Rest, deterministisch.
+export function rebalanceSplit(pcts, changedPid, value, personIds) {
+  if (!personIds.includes(changedPid)) return proportionalSplit(pcts, personIds);
+  const v = Math.min(100, Math.max(0, Math.round(Number(value) || 0)));
+  const others = personIds.filter((pid) => pid !== changedPid);
+  const out = { [changedPid]: v };
+  const rest = 100 - v;
+  const prev = others.map((pid) => Math.max(0, Number(pcts?.[pid]) || 0));
+  const prevSum = prev.reduce((a, b) => a + b, 0);
+  const weights = prevSum > 0 ? prev : others.map(() => 1);
+  const wSum = prevSum > 0 ? prevSum : others.length;
+  const exact = weights.map((w) => (rest * w) / wSum);
+  let assigned = 0;
+  others.forEach((pid, i) => { out[pid] = Math.floor(exact[i]); assigned += out[pid]; });
+  const order = others
+    .map((pid, i) => ({ pid, frac: exact[i] - Math.floor(exact[i]), i }))
+    .sort((a, b) => b.frac - a.frac || a.i - b.i);
+  for (let i = 0; assigned < rest; i++, assigned++) out[order[i % order.length].pid] += 1;
+  return out;
+}
+
 // Cent-genaue Aufteilung eines Betrags nach Prozent-Split. Rundungs-Restcents
 // werden deterministisch in Personen-Reihenfolge verteilt (größter Rest zuerst,
 // bei Gleichstand frühere Person) — die Summe der Anteile ist IMMER der Betrag.
