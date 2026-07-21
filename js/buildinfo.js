@@ -1,8 +1,17 @@
 // Auto-generiert von build.js — nicht manuell bearbeiten!
-export const BUILD      = '0.7';
-export const BUILD_HASH = 'f9ea2c0';
+export const BUILD      = '0.8';
+export const BUILD_HASH = '73c915f';
 
 export const CHANGELOG = [
+  {
+    "version": "0.8",
+    "date": "21.07.2026",
+    "changes": [
+      "Beliebig viele Personen: in den Einstellungen (oder per KI-Chat) Personen hinzufügen und entfernen — Tom & Tara bleiben der Standard",
+      "Prozent-Editor mit einem Slider je Person: jede Person lässt sich an jeder Position frei prozentual beteiligen (Regler werden automatisch auf 100 % skaliert)",
+      "„teilen\" heißt bei mehr als zwei Personen: exakt gleichmäßig auf alle — auch Pfand und Leergut"
+    ]
+  },
   {
     "version": "0.7",
     "date": "21.07.2026",
