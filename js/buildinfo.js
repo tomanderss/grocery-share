@@ -1,8 +1,15 @@
 // Auto-generiert von build.js — nicht manuell bearbeiten!
-export const BUILD      = '0.11';
-export const BUILD_HASH = 'dec28f8';
+export const BUILD      = '0.12';
+export const BUILD_HASH = 'e3dcfeb';
 
 export const CHANGELOG = [
+  {
+    "version": "0.12",
+    "date": "21.07.2026",
+    "changes": [
+      "Prozent-Editor: Regler lassen sich per Schloss sperren — gesperrte Werte bleiben stehen, nur die offenen gleichen sich ab, der letzte offene nimmt automatisch den Rest"
+    ]
+  },
   {
     "version": "0.11",
     "date": "21.07.2026",
