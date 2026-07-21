@@ -22,6 +22,10 @@ import {
   remainingCreditUsd, avgAnalysisCostUsd, estimateReceiptsLeft,
 } from './cost.js';
 import { analyzeReceipt, assistantChat } from './claude.js';
+import {
+  saveAttachments, getAttachments, deleteAttachmentsFor,
+  getAllAttachments, replaceAllAttachments, clearAttachments,
+} from './attachments.js';
 import { icon } from './icons.js';
 import { log, exportLogText, clearLog } from './debuglog.js';
 import { BUILD, CHANGELOG } from './buildinfo.js';
@@ -52,6 +56,7 @@ const state = reactive({
   toast: null,
   confirmDialog: null,   // { text, onYes }
   splitEditor: null,     // { itemId, pcts: {pid: n} } — ein Slider je Person
+  viewer: null,          // { items: [{id, base64, mediaType, page}] } — Original-Ansicht
   whatsNewOpen: false,
   updateReady: false,
   settingsOpen: { ki: false, personen: false, kategorien: false, regeln: false, daten: false, info: false },
@@ -162,6 +167,7 @@ function deleteReceipt(r) {
     state.receipts = state.receipts.filter((x) => x.id !== r.id);
     if (state.currentId === r.id) { state.currentId = null; state.screen = 'home'; }
     persistReceipts();
+    deleteAttachmentsFor(r.id); // Original-Dateien mit aufräumen
     toast('Bon gelöscht');
   });
 }
@@ -376,6 +382,12 @@ async function confirmAnalyze() {
       r = buildDraftFromAnalysis(result, usage);
     }
     trackSpend(apiCost?.usd);
+    // Original-Dateien zum Bon sichern (IndexedDB) — fürs spätere Nachschauen.
+    const saved = await saveAttachments(r.id, job.preparedList);
+    if (saved) {
+      r.attachmentCount = (r.attachmentCount || 0) + saved;
+      persistReceipts();
+    }
     state.currentId = r.id;
     state.screen = 'review';
     log('bon', job.forReceiptId ? 'reanalyzed' : 'analyzed', { items: r.items.length, store: r.store });
@@ -711,20 +723,22 @@ function deleteRule(rule) {
   persistRules();
 }
 
-function exportBackup() {
+async function exportBackup() {
+  const attachments = await getAllAttachments();
   const data = collectExportData(
     JSON.parse(JSON.stringify(state.settings)),
     JSON.parse(JSON.stringify(state.receipts)),
     JSON.parse(JSON.stringify(state.rules)),
     JSON.parse(JSON.stringify(state.credit)),
+    attachments,
   );
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = `grocery-share-backup-${new Date().toISOString().slice(0, 10)}.json`;
   a.click();
   URL.revokeObjectURL(a.href);
-  toast('Sicherung heruntergeladen (enthält den API-Key!)');
+  toast(`Sicherung heruntergeladen — inkl. ${attachments.length} Original-Datei(en) und API-Key!`);
 }
 
 async function importBackup(ev) {
@@ -733,8 +747,9 @@ async function importBackup(ev) {
   if (!file) return;
   try {
     const data = parseImportData(await file.text());
-    confirmAction(`Sicherung mit ${data.receipts.length} Bons und ${data.rules.length} Regeln einspielen? Die aktuellen Daten werden ersetzt.`, () => {
+    confirmAction(`Sicherung mit ${data.receipts.length} Bons, ${data.rules.length} Regeln und ${data.attachments.length} Original-Datei(en) einspielen? Die aktuellen Daten werden ersetzt.`, async () => {
       applyImport(data);
+      await replaceAllAttachments(data.attachments);
       state.settings = data.settings;
       state.receipts = data.receipts;
       state.rules = data.rules;
@@ -748,13 +763,33 @@ async function importBackup(ev) {
 }
 
 function wipeAll() {
-  confirmAction('Wirklich ALLE Bons, Regeln und Einstellungen löschen?', () => {
+  confirmAction('Wirklich ALLE Bons, Original-Dateien, Regeln und Einstellungen löschen?', async () => {
     localStorage.removeItem('gs_settings');
     localStorage.removeItem('gs_receipts');
     localStorage.removeItem('gs_rules');
     localStorage.removeItem('gs_chat');
+    localStorage.removeItem('gs_credit');
+    await clearAttachments();
     location.reload();
   });
+}
+
+// ── Original-Ansicht (gespeicherte Bon-Fotos/PDFs) ───────────────────────────
+async function openOriginals(r) {
+  const items = await getAttachments(r.id);
+  if (!items.length) {
+    toast('Zu diesem Bon sind keine Original-Dateien gespeichert (manuell angelegt oder vor v0.9 analysiert)', 'warn');
+    return;
+  }
+  state.viewer = { items };
+}
+
+// PDFs im neuen Tab öffnen (data-URLs blockieren manche Browser → Blob-URL).
+function openPdf(item) {
+  const bytes = Uint8Array.from(atob(item.base64), (c) => c.charCodeAt(0));
+  const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+  window.open(url, '_blank');
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
 function exportDebugLog() {
@@ -837,6 +872,7 @@ const app = createApp({
       personIds,
       go: (screen) => { state.screen = screen; if (screen === 'chat') queueMicrotask(scrollChat); },
       addManualReceipt, onFilePicked, confirmAnalyze, openReceipt, deleteReceipt,
+      openOriginals, openPdf,
       addItem, removeItem, onPriceInput, onTotalInput, setQuickSplit, splitMode, splitLabel,
       applySplitEditor, editorResult, setKind, finalizeReceipt, reopenReceipt,
       addPerson, removePerson,
@@ -946,6 +982,9 @@ const app = createApp({
             <template v-else><span v-html="ic('warn', 16)"></span> Differenz {{ fmt(totalsDiff, { sign: true }) }} zu den Positionen</template>
           </div>
         </div>
+        <button v-if="receipt.attachmentCount" class="btn btn-ghost" @click="openOriginals(receipt)">
+          <span v-html="ic('receipt', 18)"></span> Original ansehen ({{ receipt.attachmentCount }})
+        </button>
         <div v-if="receipt.notes" class="ai-note"><span v-html="ic('info', 16)"></span> {{ receipt.notes }}</div>
         <div v-if="reviewCount" class="ai-note warn"><span v-html="ic('warn', 16)"></span> {{ reviewCount }} Position(en) ohne klare Zuordnung — bitte unten prüfen.</div>
       </div>
@@ -1030,6 +1069,7 @@ const app = createApp({
         <div class="sum-actions">
           <button class="btn btn-ghost" @click="copySummary(summary, (receipt.store || 'Bon') + ' ' + formatDate(receipt.date))"><span v-html="ic('copy', 18)"></span> Tabelle kopieren</button>
           <button class="btn btn-ghost" @click="reopenReceipt"><span v-html="ic('edit', 18)"></span> Bearbeiten</button>
+          <button v-if="receipt.attachmentCount" class="btn btn-ghost" @click="openOriginals(receipt)"><span v-html="ic('receipt', 18)"></span> Original ({{ receipt.attachmentCount }})</button>
         </div>
       </div>
       <button class="btn btn-primary wide" @click="go('home')">Fertig</button>
@@ -1230,6 +1270,22 @@ const app = createApp({
     </main>
 
     <!-- ═══ Overlays ═══ -->
+    <div v-if="state.viewer" class="modal-bg viewer-bg" @click.self="state.viewer = null">
+      <div class="modal viewer-modal">
+        <div class="viewer-head">
+          <h3>Original-Bon</h3>
+          <button class="iconbtn small" @click="state.viewer = null" v-html="ic('x', 18)" aria-label="Schließen"></button>
+        </div>
+        <div class="viewer-body">
+          <template v-for="item in state.viewer.items" :key="item.id">
+            <div class="viewer-page-label" v-if="state.viewer.items.length > 1">Aufnahme {{ item.page }}</div>
+            <img v-if="item.mediaType !== 'application/pdf'" :src="'data:' + item.mediaType + ';base64,' + item.base64" alt="Bon-Foto">
+            <button v-else class="btn btn-ghost wide" @click="openPdf(item)"><span v-html="ic('receipt', 18)"></span> PDF öffnen (Aufnahme {{ item.page }})</button>
+          </template>
+        </div>
+      </div>
+    </div>
+
     <div v-if="state.analyzeConfirm" class="modal-bg" @click.self="state.analyzeConfirm = null">
       <div class="modal">
         <h3>KI-Analyse starten?</h3>
@@ -1310,5 +1366,6 @@ if (['localhost', '127.0.0.1'].includes(location.hostname)) {
     finalizeReceipt,
     buildDraftFromAnalysis,
     applyAssistantAction,
+    attachments: { saveAttachments, getAttachments, getAllAttachments },
   };
 }

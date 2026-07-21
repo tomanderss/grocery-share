@@ -165,6 +165,35 @@ test.describe('Mehrere Personen', () => {
   });
 });
 
+test.describe('Original-Dateien', () => {
+  const TINY_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+  test('gespeicherte Bon-Fotos lassen sich im Review und in der Auswertung ansehen', async ({ page }) => {
+    await gotoApp(page);
+    await seedReceipt(page, {
+      store: 'REWE',
+      items: [item({ name: 'Brot', priceCents: 300, priceInput: '3,00' })],
+    });
+    // Foto per Debug-Hook anhängen (wie nach einer echten Analyse)
+    await page.evaluate(async (png) => {
+      const r = window.__gs.state.receipts.find((x) => x.id === window.__gs.state.currentId);
+      await window.__gs.attachments.saveAttachments(r.id, [{ base64: png, mediaType: 'image/png' }]);
+      r.attachmentCount = 1;
+    }, TINY_PNG);
+
+    // Review: Original-Button öffnet den Viewer mit dem Bild
+    await page.locator('.review-meta .btn', { hasText: 'Original ansehen' }).click();
+    await expect(page.locator('.viewer-modal img')).toBeVisible();
+    await page.locator('.viewer-head .iconbtn').click();
+
+    // Auswertung: Original-Button ebenfalls vorhanden
+    await page.locator('.review-actions .btn-primary').click();
+    await page.waitForSelector('.screen.summary');
+    await page.locator('.sum-actions .btn', { hasText: 'Original' }).click();
+    await expect(page.locator('.viewer-modal img')).toBeVisible();
+  });
+});
+
 test.describe('Persistenz', () => {
   test('Bons überleben einen Reload', async ({ page }) => {
     await gotoApp(page);
