@@ -221,6 +221,29 @@ describe('beliebig viele Personen', () => {
     assert.deepEqual(rebalanceSplit({ p1: 50, p2: 50 }, 'p1', -5, ['p1', 'p2']), { p1: 0, p2: 100 });
   });
 
+  test('rebalanceSplit mit Schloss: gesperrte Werte bleiben stehen', () => {
+    // p2 gesperrt: p1 → 60 nimmt den Rest NUR von p3
+    assert.deepEqual(
+      rebalanceSplit({ p1: 40, p2: 30, p3: 30 }, 'p1', 60, PIDS3, { p2: true }),
+      { p1: 60, p2: 30, p3: 10 }
+    );
+    // bewegter Wert wird geklemmt, damit gesperrte Werte Platz behalten
+    assert.deepEqual(
+      rebalanceSplit({ p1: 40, p2: 30, p3: 30 }, 'p1', 90, PIDS3, { p2: true }),
+      { p1: 70, p2: 30, p3: 0 }
+    );
+    // alle übrigen gesperrt → der letzte offene Regler nimmt zwangsweise den Rest
+    assert.deepEqual(
+      rebalanceSplit({ p1: 40, p2: 30, p3: 30 }, 'p1', 5, PIDS3, { p2: true, p3: true }),
+      { p1: 40, p2: 30, p3: 30 }
+    );
+    // Summe ist auch mit Schloss immer exakt 100
+    const moved = rebalanceSplit({ p1: 33, p2: 33, p3: 34 }, 'p3', 50, PIDS3, { p1: true });
+    assert.equal(moved.p1 + moved.p2 + moved.p3, 100);
+    assert.equal(moved.p1, 33);
+    assert.equal(moved.p3, 50);
+  });
+
   test('receiptSummary: teilen-Zeile für alle drei, einzeln je Anteil', () => {
     const r = {
       items: [

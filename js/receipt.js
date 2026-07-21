@@ -87,17 +87,28 @@ export function proportionalSplit(raw, personIds) {
   return out;
 }
 
-// Slider-Bewegung im Prozent-Editor: eine Person wird auf `value` gesetzt, die
-// ÜBRIGEN teilen sich den Rest zu 100 proportional zu ihren bisherigen Werten
-// (standen alle Übrigen auf 0, gleichmäßig). So summieren die Regler nach jeder
+// Slider-Bewegung im Prozent-Editor: eine Person wird auf `value` gesetzt,
+// GESPERRTE Personen (locked[pid]) behalten ihren Wert, die übrigen OFFENEN
+// teilen sich den Rest zu 100 proportional zu ihren bisherigen Werten (standen
+// alle Offenen auf 0, gleichmäßig). Der bewegte Wert wird geklemmt, damit die
+// gesperrten Werte immer Platz haben; sind ALLE übrigen gesperrt, nimmt der
+// bewegte Regler zwangsweise exakt den Rest. So summieren die Regler nach jeder
 // Bewegung sichtbar auf exakt 100 % — bei 2 Personen springt der andere Regler
 // direkt auf das Komplement (20 → 80). Rundung per größtem Rest, deterministisch.
-export function rebalanceSplit(pcts, changedPid, value, personIds) {
+export function rebalanceSplit(pcts, changedPid, value, personIds, locked = {}) {
   if (!personIds.includes(changedPid)) return proportionalSplit(pcts, personIds);
-  const v = Math.min(100, Math.max(0, Math.round(Number(value) || 0)));
-  const others = personIds.filter((pid) => pid !== changedPid);
-  const out = { [changedPid]: v };
-  const rest = 100 - v;
+  const lockedIds = personIds.filter((pid) => pid !== changedPid && locked[pid]);
+  const lockedSum = lockedIds.reduce((a, pid) => a + Math.max(0, Math.round(Number(pcts?.[pid]) || 0)), 0);
+  const others = personIds.filter((pid) => pid !== changedPid && !locked[pid]);
+  const out = {};
+  lockedIds.forEach((pid) => { out[pid] = Math.max(0, Math.round(Number(pcts?.[pid]) || 0)); });
+  if (!others.length) {
+    out[changedPid] = Math.max(0, 100 - lockedSum); // letzter offener Regler = Rest
+    return out;
+  }
+  const v = Math.min(Math.max(0, 100 - lockedSum), Math.max(0, Math.round(Number(value) || 0)));
+  out[changedPid] = v;
+  const rest = 100 - lockedSum - v;
   const prev = others.map((pid) => Math.max(0, Number(pcts?.[pid]) || 0));
   const prevSum = prev.reduce((a, b) => a + b, 0);
   const weights = prevSum > 0 ? prev : others.map(() => 1);
