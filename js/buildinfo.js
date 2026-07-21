@@ -1,8 +1,15 @@
 // Auto-generiert von build.js — nicht manuell bearbeiten!
-export const BUILD      = '0.2';
-export const BUILD_HASH = '1eb6b08';
+export const BUILD      = '0.3';
+export const BUILD_HASH = 'a46a0fa';
 
 export const CHANGELOG = [
+  {
+    "version": "0.3",
+    "date": "21.07.2026",
+    "changes": [
+      "Jeder per KI analysierte Bon zeigt jetzt die API-Kosten der Analyse (in Bon-Liste, Auswertung und als Monatssumme)"
+    ]
+  },
   {
     "version": "0.2",
     "date": "21.07.2026",
