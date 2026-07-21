@@ -1,8 +1,19 @@
 // Auto-generiert von build.js — nicht manuell bearbeiten!
-export const BUILD      = '0.5';
-export const BUILD_HASH = '550a420';
+export const BUILD      = '0.6';
+export const BUILD_HASH = '95081d8';
 
 export const CHANGELOG = [
+  {
+    "version": "0.6",
+    "date": "21.07.2026",
+    "changes": [
+      "Datumsfeld im Bon-Formular passt sich jetzt sauber ins Layout ein (ragte vorher aus dem Bildschirm)",
+      "Bearbeiten eines ausgewerteten Bons speichert nur noch lokal („Änderungen speichern\") — komplett kostenlos, keine neue KI-Analyse",
+      "Jede KI-Analyse muss jetzt explizit bestätigt werden, mit Kostenschätzung aus deinen letzten Analysen",
+      "Neuer Button „Neu analysieren\" am Bon (mit Warnhinweis) für den seltenen Fall, dass die KI wirklich nochmal ranmuss",
+      "Kostenhinweis im KI-Chat ergänzt"
+    ]
+  },
   {
     "version": "0.5",
     "date": "21.07.2026",
