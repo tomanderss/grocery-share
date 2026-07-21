@@ -14,11 +14,13 @@ export const DEFAULT_PERSONS = [
 // "teilen". Kategorien sind änderbar/ergänzbar (Einstellungen oder KI-Chat);
 // die IDs bleiben stabil. `builtin` schützt vor versehentlichem Löschen der
 // Kategorie, auf die die Pfand-Logik zeigt.
+// `listItems`: die Auswertung zeigt bei dieser Kategorie zusätzlich die
+// Artikelnamen in Klammern (für seltene Sammel-Kategorien wie Sonstiges).
 export const DEFAULT_CATEGORIES = [
   { id: 'einkaufen', name: 'Einkaufen', icon: 'cart' },
   { id: 'getraenke', name: 'Getränke', icon: 'bottle' },
   { id: 'drogerie', name: 'Drogerie & Hausrat', icon: 'soap' },
-  { id: 'sonstiges', name: 'Sonstiges', icon: 'gift' },
+  { id: 'sonstiges', name: 'Sonstiges', icon: 'gift', listItems: true },
 ];
 
 // Pfand (Kauf UND Rückgabe) wird IMMER 50/50 geteilt und landet in dieser

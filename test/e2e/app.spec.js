@@ -46,10 +46,37 @@ test.describe('Bon-Workflow (manuell)', () => {
     // Einzeln-Zeilen vorhanden
     await expect(table).toContainText('Einkaufen einzeln');
     await expect(table).toContainText('Getränke einzeln');
+    // Zwischensummen je Kategorie
+    await expect(table).toContainText('Einkaufen gesamt');
+    await expect(table).toContainText('Getränke gesamt');
     // Personensummen: Tom 4,00 + 4,00 + 7,00 = 15,00 / Tara 4,00 + 3,00 = 7,00
     const foot = table.locator('tfoot td.num');
     await expect(foot.nth(0)).toHaveText('15,00 €');
     await expect(foot.nth(1)).toHaveText('7,00 €');
+  });
+
+  test('Sonstiges listet die Artikelnamen, Rabatt und Regel-Begründung sichtbar', async ({ page }) => {
+    await gotoApp(page);
+    await seedReceipt(page, {
+      store: 'REWE',
+      items: [
+        item({ name: 'Blumenstrauß', priceCents: 499, priceInput: '4,99', categoryId: 'sonstiges', split: { p1: 100, p2: 0 } }),
+        item({
+          name: 'Booster', priceCents: 39, priceInput: '0,39', discountCents: 10,
+          ruleInfo: { matchedName: 'Booster Drink', exact: false, confidencePct: 81, label: '81 % nur Tom · 19 % geteilt (16×)' },
+          fromRule: true, split: { p1: 100, p2: 0 },
+        }),
+      ],
+    });
+    // Review: Rabatt-Chip + Regel-Begründung
+    await expect(page.locator('.chip-good', { hasText: 'Rabatt' })).toContainText('inkl. 0,10 € Rabatt');
+    await expect(page.locator('.rule-hint')).toContainText('81 % nur Tom');
+    await expect(page.locator('.rule-hint')).toContainText('erkannt als „Booster Drink“');
+    // Auswertung: Sonstiges mit Artikelnamen in Klammern
+    await page.locator('.review-actions .btn-primary').click();
+    await page.waitForSelector('.screen.summary');
+    await expect(page.locator('.sum-table')).toContainText('Sonstiges gesamt');
+    await expect(page.locator('.cat-items')).toContainText('Blumenstrauß');
   });
 
   test('Differenz-Warnung bei abweichendem Gesamtbetrag', async ({ page }) => {

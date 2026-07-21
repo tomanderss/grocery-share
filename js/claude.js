@@ -11,6 +11,7 @@
 // Antwort garantiert parsebares JSON ist.
 
 import { log } from './debuglog.js';
+import { predictRule, ruleDistributionLabel } from './rules.js';
 
 const API_URL = 'https://api.anthropic.com/v1/messages';
 
@@ -92,11 +93,12 @@ function extractionSchema(settings) {
         items: {
           type: 'object',
           additionalProperties: false,
-          required: ['name', 'qty', 'totalPrice', 'kind', 'categoryId', 'assignment'],
+          required: ['name', 'qty', 'totalPrice', 'discount', 'kind', 'categoryId', 'assignment'],
           properties: {
             name: { type: 'string', description: 'Artikelname wie auf dem Bon (lesbar aufbereitet).' },
             qty: { type: 'number', description: 'Menge/Stückzahl, 1 wenn nicht angegeben.' },
             totalPrice: { type: 'number', description: 'Gesamtpreis dieser Position in Euro NACH Artikelrabatt. Negativ bei Leergut/Pfandrückgabe und Gutschriften.' },
+            discount: { type: 'number', description: 'Artikelrabatt in Euro, der bereits in totalPrice eingerechnet ist (positive Zahl). 0 wenn kein Rabatt auf diese Position.' },
             kind: {
               type: 'string',
               enum: ['normal', 'deposit', 'deposit_return'],
@@ -124,7 +126,8 @@ function extractionPrompt(settings, ruleLines) {
   return `Du analysierst einen deutschen Kassenbon (typisch REWE, EDEKA, Rossmann, ALDI, dm, Lidl).
 
 Extrahiere ALLE Positionen einzeln und vollständig:
-- Artikelrabatte (z.B. "Rabatt -0,50", "AKTION", Coupon direkt unter einem Artikel) rechnest du in den totalPrice des zugehörigen Artikels ein — sie sind KEINE eigene Position.
+- RABATTE — bei JEDER Position konsequent prüfen, nie eine überspringen: Gehe den Bon Zeile für Zeile durch. Jede Abzugszeile ("Rabatt", "RABATT", "AKTION", "Coupon", "Preisvorteil", "Treue", ein negativer Betrag o.ä.) direkt unter oder neben einem Artikel gehört zu GENAU diesem Artikel: rechne sie in dessen totalPrice ein (Preis NACH Rabatt) UND trage den Rabattbetrag als positives discount-Feld dieser Position ein. Rabattzeilen sind NIE eine eigene Position.
+- Nur wenn ein Rabatt eindeutig für den GESAMTEN Einkauf gilt (z.B. "5% auf alles", Mitarbeiterrabatt, Coupon ohne Artikelbezug am Bon-Ende): lege dafür eine eigene Position an (Name z.B. "Gesamtrabatt 5%", negativer totalPrice, discount 0, kind normal, assignment shared).
 - Pfand beim Kauf ("PFAND", "+PFAND 0,25") ist eine EIGENE Position mit kind=deposit (positiver Betrag).
 - Pfandrückgabe/Leergut ("LEERGUT", "PFANDBON", negative Beträge) ist eine eigene Position mit kind=deposit_return (negativer Betrag).
 - Gewichtsartikel (z.B. "0,486 kg x 2,99 €/kg") als eine Position mit dem Endpreis.
@@ -214,10 +217,12 @@ function chatSchema(settings) {
 function chatSystemPrompt(settings, rules) {
   const persons = settings.persons.map((p) => `${p.id} = ${p.name}`).join(', ');
   const cats = settings.categories.map((c) => `${c.id} = ${c.name}`).join(', ');
+  const personIds = settings.persons.map((p) => p.id);
   const ruleLines = rules.slice(0, 80).map((r) => {
-    const parts = settings.persons.map((p) => `${p.name} ${r.split[p.id] || 0}%`).join(' / ');
-    return `${r.name} → ${r.categoryId}, ${parts}`;
-  }).join('\n');
+    const pred = predictRule(r, personIds);
+    if (!pred) return null;
+    return `${r.name} → ${pred.categoryId}, bisher ${ruleDistributionLabel(r, settings.persons)}`;
+  }).filter(Boolean).join('\n');
   return `Du bist der eingebaute Assistent der App "Grocery Share". Die App teilt Kassenbon-Kosten zwischen zwei Personen auf.
 
 Aktuelle Konfiguration:
