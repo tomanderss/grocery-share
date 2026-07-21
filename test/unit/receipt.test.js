@@ -141,6 +141,21 @@ describe('receiptSummary — das Beispiel aus der Spezifikation', () => {
     assert.deepEqual(s.personTotals, { p1: 350 + 200 + 700, p2: 350 + 700 });
   });
 
+  test('rows sammeln die Artikelnamen (dedupliziert) für die Anzeige', () => {
+    const r = {
+      items: [
+        item({ name: 'Blume', categoryId: 'sonstiges', split: { p1: 100, p2: 0 } }),
+        item({ id: 'i2', name: 'Geschenk', categoryId: 'sonstiges' }),
+        item({ id: 'i3', name: 'Blume', categoryId: 'sonstiges' }),
+      ],
+    };
+    const s = receiptSummary(r, SETTINGS);
+    const row = s.rows.find((x) => x.categoryId === 'sonstiges');
+    assert.deepEqual(row.itemNames, ['Blume', 'Geschenk']);
+    // Kategorie-Zwischensumme = einzeln + teilen je Person
+    assert.equal(row.single.p1 + row.sharedPer.p1 + row.single.p2 + row.sharedPer.p2, row.total);
+  });
+
   test('unbekannte Kategorie fällt auf die Standard-Kategorie zurück', () => {
     const r = { items: [item({ categoryId: 'geloescht' })] };
     const s = receiptSummary(r, SETTINGS);

@@ -129,6 +129,9 @@ export function receiptSummary(receipt, settings) {
       sharedPer: Object.fromEntries(personIds.map((pid) => [pid, 0])),
       single: Object.fromEntries(personIds.map((pid) => [pid, 0])),
       total: 0,
+      // Artikelnamen der Kategorie (dedupliziert) — die UI zeigt sie z.B. bei
+      // "Sonstiges" in Klammern an, damit klar ist, was da drinsteckt.
+      itemNames: [],
     });
   });
   // Unbekannte Kategorie-IDs (z.B. gelöschte Kategorie) → Standard-Kategorie
@@ -144,6 +147,8 @@ export function receiptSummary(receipt, settings) {
     const row = byCat.get(byCat.has(item.categoryId) ? item.categoryId : fallbackId);
     if (!row) return;
     grandTotal += item.priceCents;
+    const name = String(item.name || '').trim();
+    if (name && !row.itemNames.includes(name)) row.itemNames.push(name);
     const shares = splitAmount(item.priceCents, item.split, personIds);
     personIds.forEach((pid) => { personTotals[pid] += shares[pid]; });
     if (isEvenSplit(item.split, personIds)) {

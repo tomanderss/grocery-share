@@ -13,7 +13,10 @@ import {
   formatCents, toCents, evenSplit, normalizeSplit, isEvenSplit,
   receiptSummary, monthSummary, itemsTotal, receiptMonth,
 } from './receipt.js';
-import { applyRules, learnFromReceipt, rulesForPrompt, matchRule, normalizeKey } from './rules.js';
+import {
+  applyRules, learnFromReceipt, rulesForPrompt, normalizeKey, normalizeRules,
+  splitKeyOf, predictRule, ruleDistributionLabel,
+} from './rules.js';
 import {
   costUsd, formatCost, formatUsd, totalApiCostUsd,
   remainingCreditUsd, avgAnalysisCostUsd, estimateReceiptsLeft,
@@ -52,6 +55,10 @@ const state = reactive({
   settingsOpen: { ki: false, personen: false, kategorien: false, regeln: false, daten: false, info: false },
   newCategoryName: '',
 });
+
+// Alte Regel-Form (bis v0.4: nur letzter Split) auf die Statistik-Form migrieren.
+state.rules = normalizeRules(state.rules, state.settings.persons.map((p) => p.id));
+saveRules(state.rules);
 
 // ── Persistenz (automatisch bei Änderung) ────────────────────────────────────
 function persistReceipts() { saveReceipts(state.receipts); }
@@ -171,7 +178,7 @@ function finalizeReceipt() {
   });
   r.status = 'final';
   if (state.settings.learningEnabled) {
-    state.rules = learnFromReceipt(state.rules, r, Date.now());
+    state.rules = learnFromReceipt(state.rules, r, Date.now(), personIds());
     persistRules();
   }
   persistReceipts();
@@ -346,6 +353,8 @@ function buildDraftFromAnalysis(result, usage = null) {
       qty: it.qty || 1,
       priceCents,
       priceInput: (priceCents / 100).toFixed(2).replace('.', ','),
+      discountCents: Math.max(0, toCents(it.discount)), // bereits in priceCents eingerechnet
+
       categoryId: state.settings.categories.some((c) => c.id === it.categoryId)
         ? it.categoryId : state.settings.defaultCategoryId,
       split,
@@ -354,8 +363,10 @@ function buildDraftFromAnalysis(result, usage = null) {
       fromRule: false,
     };
   });
-  // Gelernte Regeln schlagen die KI-Vorschläge.
-  items = applyRules(items, state.rules).map((i) => (i.fromRule ? { ...i, needsReview: false } : i));
+  // Gelernte Regeln schlagen die KI-Vorschläge (unscharfes Matching + häufigste
+  // Zuordnung; ruleInfo trägt die Begründung in die Review-Ansicht).
+  items = applyRules(items, state.rules, pids, state.settings.persons)
+    .map((i) => (i.fromRule ? { ...i, needsReview: false } : i));
   return newDraft({
     store: result.store || '',
     date: /^\d{4}-\d{2}-\d{2}$/.test(result.date || '') ? result.date : new Date().toISOString().slice(0, 10),
@@ -405,6 +416,10 @@ function summaryToTSV(summary, title) {
     if (row.sharedTotal !== 0) {
       lines.push([`${row.name} teilen`, ...pids.map((pid) => euro(row.sharedPer[pid]))].join('\t'));
     }
+    const cat = state.settings.categories.find((c) => c.id === row.categoryId);
+    const names = (cat?.listItems || row.categoryId === 'sonstiges') && row.itemNames.length
+      ? ` (${row.itemNames.join(', ')})` : '';
+    lines.push([`${row.name} gesamt${names}`, ...pids.map((pid) => euro(row.single[pid] + row.sharedPer[pid]))].join('\t'));
   });
   lines.push(['Gesamt', ...pids.map((pid) => euro(summary.personTotals[pid]))].join('\t'));
   return lines.join('\n');
@@ -503,8 +518,19 @@ function applyAssistantAction(a) {
           ? a.categoryId : state.settings.defaultCategoryId;
         const split = normalizeSplit(a.split, pids);
         const key = normalizeKey(a.productName);
+        const splitKey = splitKeyOf(split, pids);
         const idx = state.rules.findIndex((r) => r.key === key);
-        const rule = { key, name: a.productName, categoryId: catId, split, count: (idx >= 0 ? state.rules[idx].count : 0) + 1, updatedAt: Date.now() };
+        // Explizite Nutzer-Anweisung dominiert die bisherige Statistik: der
+        // gewünschte Split bekommt mehr Gewicht als alle Beobachtungen zusammen.
+        const weight = (idx >= 0 ? state.rules[idx].count || 0 : 0) + 1;
+        const rule = {
+          key,
+          name: a.productName,
+          categoryStats: { [catId]: weight },
+          splitStats: { [splitKey]: weight },
+          count: weight,
+          updatedAt: Date.now(),
+        };
         if (idx >= 0) state.rules[idx] = rule; else state.rules.push(rule);
         persistRules();
         const parts = pids.filter((pid) => split[pid] > 0).map((pid) => `${personName(pid)} ${split[pid]}%`).join(' / ');
@@ -710,6 +736,13 @@ const app = createApp({
       exportBackup, importBackup, wipeAll, exportDebugLog,
       checkForUpdate, restartForUpdate,
       confirmYes: () => { const d = state.confirmDialog; state.confirmDialog = null; d?.onYes?.(); },
+      ruleLabel: (r) => ruleDistributionLabel(r, state.settings.persons),
+      ruleCatName: (r) => categoryName(predictRule(r, personIds())?.categoryId),
+      // Artikelnamen in der Auswertung nur für Sammel-Kategorien (Sonstiges).
+      showNames: (row) => {
+        const c = state.settings.categories.find((x) => x.id === row.categoryId);
+        return !!(c?.listItems || row.categoryId === 'sonstiges') && row.itemNames.length > 0;
+      },
       splitPreview: (p1) => {
         const pids = personIds();
         return `${personName(pids[0])} ${Math.round(p1)}% / ${personName(pids[1])} ${100 - Math.round(p1)}%`;
@@ -830,10 +863,15 @@ const app = createApp({
           <div class="item-badges">
             <span v-if="item.kind !== 'normal'" class="chip chip-accent">{{ kindLabel(item.kind) }} — immer 50:50, Kategorie {{ categoryName(state.settings.depositCategoryId) }}</span>
             <span v-else class="chip">{{ splitLabel(item) }}</span>
+            <span v-if="item.discountCents" class="chip chip-good">inkl. {{ fmt(item.discountCents) }} Rabatt</span>
             <span v-if="item.fromRule" class="chip chip-good" title="Aus gelernter Regel">gelernt ✓</span>
             <span v-if="item.needsReview" class="chip chip-warn">Zuordnung prüfen</span>
             <button class="chip chip-btn" v-if="item.kind === 'normal'" @click="setKind(item, 'deposit')">als Pfand</button>
             <button class="chip chip-btn" v-else @click="setKind(item, 'normal')">kein Pfand</button>
+          </div>
+          <div v-if="item.ruleInfo" class="rule-hint">
+            <span v-html="ic('bulb', 14)"></span>
+            Bisher {{ item.ruleInfo.label }}<template v-if="!item.ruleInfo.exact"> · erkannt als „{{ item.ruleInfo.matchedName }}“</template>
           </div>
         </div>
       </div>
@@ -868,6 +906,10 @@ const app = createApp({
               <tr v-if="row.sharedTotal !== 0">
                 <td>{{ row.name }} teilen <span class="mut">({{ fmt(row.sharedTotal) }} gesamt)</span></td>
                 <td v-for="pid in personIds()" :key="pid" class="num">{{ fmt(row.sharedPer[pid]) }}</td>
+              </tr>
+              <tr class="cat-total">
+                <td>{{ row.name }} gesamt<div v-if="showNames(row)" class="cat-items">({{ row.itemNames.join(', ') }})</div></td>
+                <td v-for="pid in personIds()" :key="pid" class="num">{{ fmt(row.single[pid] + row.sharedPer[pid]) }}</td>
               </tr>
             </template>
           </tbody>
@@ -908,6 +950,10 @@ const app = createApp({
               <tr v-if="row.sharedTotal !== 0">
                 <td>{{ row.name }} teilen <span class="mut">({{ fmt(row.sharedTotal) }} gesamt)</span></td>
                 <td v-for="pid in personIds()" :key="pid" class="num">{{ fmt(row.sharedPer[pid]) }}</td>
+              </tr>
+              <tr class="cat-total">
+                <td>{{ row.name }} gesamt<div v-if="showNames(row)" class="cat-items">({{ row.itemNames.join(', ') }})</div></td>
+                <td v-for="pid in personIds()" :key="pid" class="num">{{ fmt(row.single[pid] + row.sharedPer[pid]) }}</td>
               </tr>
             </template>
           </tbody>
@@ -1023,7 +1069,7 @@ const app = createApp({
           <div v-for="r in sortedRules.slice(0, 100)" :key="r.key" class="rule-row">
             <div class="rule-main">
               <div class="rule-name">{{ r.name }}</div>
-              <div class="rule-detail">{{ categoryName(r.categoryId) }} · {{ personIds().filter((pid) => r.split[pid] > 0).map((pid) => personName(pid) + ' ' + r.split[pid] + '%').join(' / ') }}</div>
+              <div class="rule-detail">{{ ruleCatName(r) }} · {{ ruleLabel(r) }}</div>
             </div>
             <button class="iconbtn small" @click="deleteRule(r)" v-html="ic('trash', 16)" aria-label="Regel löschen"></button>
           </div>
