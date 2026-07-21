@@ -58,7 +58,16 @@ async function callClaude({ apiKey, body }) {
     log('api', 'truncated at max_tokens');
   }
   try {
-    return JSON.parse(text);
+    return {
+      data: JSON.parse(text),
+      // Token-Verbrauch fürs Kosten-Tracking (js/cost.js); model = tatsächlich
+      // benutztes Modell laut API-Antwort.
+      usage: {
+        model: data.model,
+        inputTokens: data.usage?.input_tokens || 0,
+        outputTokens: data.usage?.output_tokens || 0,
+      },
+    };
   } catch (e) {
     log('api', 'json parse failed', { head: text.slice(0, 120) });
     throw new Error('Antwort der KI war nicht lesbar. Bitte erneut versuchen.');
@@ -133,6 +142,7 @@ Wenn du keine belastbare Vermutung zur Person hast: assignment=shared für typis
 }
 
 // file: { base64, mediaType } — Bilder als image-Block, PDFs als document-Block.
+// Rückgabe: { data, usage } (usage → Kosten-Tracking am Bon).
 export async function analyzeReceipt({ settings, file, ruleLines }) {
   const source = { type: 'base64', media_type: file.mediaType, data: file.base64 };
   const block = file.mediaType === 'application/pdf'

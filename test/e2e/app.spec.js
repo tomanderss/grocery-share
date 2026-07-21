@@ -103,3 +103,22 @@ test.describe('Persistenz', () => {
     await expect(page.locator('.receipt-row').first()).toContainText('ALDI');
   });
 });
+
+test.describe('KI-Kosten', () => {
+  test('gespeicherte API-Kosten erscheinen in Bon-Liste und Auswertung', async ({ page }) => {
+    await gotoApp(page);
+    await seedReceipt(page, {
+      store: 'REWE',
+      apiCost: { usd: 0.012, model: 'claude-opus-4-8', inputTokens: 2000, outputTokens: 80 },
+      items: [item({ name: 'Brot', priceCents: 300, priceInput: '3,00' })],
+    });
+    // Auswertung zeigt Kosten + Tokens
+    await page.locator('.review-actions .btn-primary').click();
+    await page.waitForSelector('.screen.summary');
+    await expect(page.locator('.sum-api')).toContainText('KI-Analyse: ≈ 1,2 ¢');
+    await expect(page.locator('.sum-api')).toContainText('Tokens');
+    // Bon-Liste auf Home zeigt Kosten
+    await page.locator('.screen.summary .btn-primary').click();
+    await expect(page.locator('.receipt-row .rr-api').first()).toContainText('KI ≈ 1,2 ¢');
+  });
+});

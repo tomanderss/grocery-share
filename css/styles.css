@@ -130,6 +130,8 @@ label { display: flex; flex-direction: column; gap: 5px; font-size: .82rem; colo
 .sum-store { font-weight: 800; font-size: 1.05rem; }
 .sum-date { color: var(--text3); font-size: .8rem; margin-top: 2px; }
 .sum-total { font-weight: 800; font-size: 1.15rem; font-variant-numeric: tabular-nums; }
+.sum-api, .rr-api { color: var(--text3); font-size: .78rem; }
+.sum-api { margin-top: 3px; }
 .sum-table { width: 100%; border-collapse: collapse; font-size: .9rem; }
 .sum-table th { text-align: right; color: var(--text3); font-size: .78rem; text-transform: uppercase; letter-spacing: .4px; padding: 6px 4px; }
 .sum-table th:first-child { text-align: left; }

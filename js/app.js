@@ -13,6 +13,7 @@ import {
   receiptSummary, monthSummary, itemsTotal, receiptMonth,
 } from './receipt.js';
 import { applyRules, learnFromReceipt, rulesForPrompt, matchRule, normalizeKey } from './rules.js';
+import { costUsd, formatCost, totalApiCostUsd } from './cost.js';
 import { analyzeReceipt, assistantChat } from './claude.js';
 import { icon } from './icons.js';
 import { log, exportLogText, clearLog } from './debuglog.js';
@@ -74,7 +75,7 @@ function currentReceipt() {
   return state.receipts.find((r) => r.id === state.currentId) || null;
 }
 
-function newDraft({ store = '', date = '', totalCents = 0, items = [], notes = '' } = {}) {
+function newDraft({ store = '', date = '', totalCents = 0, items = [], notes = '', apiCost = null } = {}) {
   const r = {
     id: newId('bon'),
     store,
@@ -83,6 +84,7 @@ function newDraft({ store = '', date = '', totalCents = 0, items = [], notes = '
     status: 'draft',
     totalCents,
     notes,
+    apiCost, // { usd, model, inputTokens, outputTokens } der KI-Analyse, sonst null
     items,
   };
   state.receipts.unshift(r);
@@ -244,12 +246,12 @@ async function onFilePicked(ev) {
   state.analyzeError = '';
   try {
     const prepared = await prepareFile(file);
-    const result = await analyzeReceipt({
+    const { data: result, usage } = await analyzeReceipt({
       settings: state.settings,
       file: prepared,
       ruleLines: rulesForPrompt(state.rules, state.settings.persons, state.settings.categories),
     });
-    const r = buildDraftFromAnalysis(result);
+    const r = buildDraftFromAnalysis(result, usage);
     state.currentId = r.id;
     state.screen = 'review';
     log('bon', 'analyzed', { items: r.items.length, store: r.store });
@@ -302,7 +304,7 @@ function loadImage(file) {
   });
 }
 
-function buildDraftFromAnalysis(result) {
+function buildDraftFromAnalysis(result, usage = null) {
   const pids = personIds();
   let items = (result.items || []).map((it) => {
     let split = evenSplit(pids);
@@ -334,6 +336,9 @@ function buildDraftFromAnalysis(result) {
     date: /^\d{4}-\d{2}-\d{2}$/.test(result.date || '') ? result.date : new Date().toISOString().slice(0, 10),
     totalCents: toCents(result.total),
     notes: result.notes || '',
+    apiCost: usage
+      ? { usd: costUsd(usage.model, usage.inputTokens, usage.outputTokens), ...usage }
+      : null,
     items,
   });
 }
@@ -403,7 +408,7 @@ async function sendChat() {
   state.chatBusy = true;
   try {
     const history = state.chat.slice(-CHAT_HISTORY_LIMIT).map((m) => ({ role: m.role, text: m.text }));
-    const res = await assistantChat({ settings: state.settings, rules: state.rules, history });
+    const { data: res } = await assistantChat({ settings: state.settings, rules: state.rules, history });
     const applied = (res.actions || []).map(applyAssistantAction).filter(Boolean);
     state.chat.push({ role: 'assistant', text: res.reply, actions: applied, ts: Date.now() });
     saveChat(state.chat);
@@ -659,7 +664,7 @@ const app = createApp({
       models: CLAUDE_MODELS,
       receipt, summary, month, monthReceipts, totalsDiff, reviewCount, sortedRules,
       ic: (name, size) => icon(name, { size }),
-      fmt, personName, categoryName, formatDate, monthLabel,
+      fmt, personName, categoryName, formatDate, monthLabel, formatCost, totalApiCostUsd,
       personIds,
       go: (screen) => { state.screen = screen; if (screen === 'chat') queueMicrotask(scrollChat); },
       addManualReceipt, onFilePicked, openReceipt, deleteReceipt,
@@ -729,7 +734,7 @@ const app = createApp({
         <button v-for="r in state.receipts.slice(0, 30)" :key="r.id" class="receipt-row card" @click="openReceipt(r)">
           <div class="rr-main">
             <div class="rr-store">{{ r.store || 'Ohne Namen' }} <span v-if="r.status === 'draft'" class="chip chip-warn">Entwurf</span></div>
-            <div class="rr-date">{{ formatDate(r.date) }} · {{ r.items.length }} Positionen</div>
+            <div class="rr-date">{{ formatDate(r.date) }} · {{ r.items.length }} Positionen<span v-if="r.apiCost" class="rr-api"> · KI {{ formatCost(r.apiCost.usd) }}</span></div>
           </div>
           <div class="rr-total">{{ fmt(r.totalCents || summaryFor(r).grandTotal) }}</div>
         </button>
@@ -807,6 +812,7 @@ const app = createApp({
           <div>
             <div class="sum-store">{{ receipt.store || 'Ohne Namen' }}</div>
             <div class="sum-date">{{ formatDate(receipt.date) }} · {{ receipt.items.length }} Positionen</div>
+            <div v-if="receipt.apiCost" class="sum-api">KI-Analyse: {{ formatCost(receipt.apiCost.usd) }} <span class="mut">({{ (receipt.apiCost.inputTokens + receipt.apiCost.outputTokens).toLocaleString('de-DE') }} Tokens)</span></div>
           </div>
           <div class="sum-total">{{ fmt(summary.grandTotal) }}</div>
         </div>
@@ -843,7 +849,13 @@ const app = createApp({
       </div>
 
       <div class="card" v-if="month.receiptCount">
-        <div class="sum-head"><div class="sum-store">{{ month.receiptCount }} abgeschlossene Bons</div><div class="sum-total">{{ fmt(month.grandTotal) }}</div></div>
+        <div class="sum-head">
+          <div>
+            <div class="sum-store">{{ month.receiptCount }} abgeschlossene Bons</div>
+            <div v-if="totalApiCostUsd(monthReceipts) > 0" class="sum-api">KI-Kosten im Monat: {{ formatCost(totalApiCostUsd(monthReceipts)) }}</div>
+          </div>
+          <div class="sum-total">{{ fmt(month.grandTotal) }}</div>
+        </div>
         <table class="sum-table">
           <thead><tr><th></th><th v-for="pid in personIds()" :key="pid">{{ personName(pid) }}</th></tr></thead>
           <tbody>
@@ -871,7 +883,7 @@ const app = createApp({
         <button v-for="r in monthReceipts" :key="r.id" class="receipt-row card" @click="openReceipt(r)">
           <div class="rr-main">
             <div class="rr-store">{{ r.store || 'Ohne Namen' }} <span v-if="r.status === 'draft'" class="chip chip-warn">Entwurf</span></div>
-            <div class="rr-date">{{ formatDate(r.date) }}</div>
+            <div class="rr-date">{{ formatDate(r.date) }}<span v-if="r.apiCost" class="rr-api"> · KI {{ formatCost(r.apiCost.usd) }}</span></div>
           </div>
           <div class="rr-total">{{ fmt(r.totalCents || summaryFor(r).grandTotal) }}</div>
         </button>
