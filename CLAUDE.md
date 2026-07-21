@@ -53,8 +53,9 @@ node create-icons.js                       # regenerate PNG icons
 1. **`changes.txt`** — add a short German user-facing bullet. Source for in-app release notes.
 2. **Tests mitführen** — neue Rechen-/Lern-Logik gehört nach `receipt.js`/`rules.js` (rein) mit Unit-Tests; UI-Flüsse in die E2E-Suite.
 3. **Diagnostics** — nicht-triviale Flows loggen via `log()` (Kategorien: `app`/`api`/`bon`/`storage`/`sw`/`error`), inkl. `tookMs` bei API-Aufrufen. Low-frequency only.
-4. **Release cutten** — nach gemergten Änderungen `node build.js` ausführen (bumpt Version, schreibt `js/buildinfo.js`, leert `changes.txt`, bumpt SW-Cache), committen und pushen — erst dann wird die Version in der App sichtbar (GitHub Pages deployt `main` automatisch).
-5. **Update this file** — if the change affects architecture, conventions, or workflow.
+4. **PR + Auto-Merge — immer, automatisch, ohne zu fragen.** Sobald eine Änderung committet und gepusht ist, sofort den PR gegen `main` erstellen und **im selben Zug** Auto-Merge (SQUASH) aktivieren — nie auf Aufforderung warten, nie direkt auf `main` pushen. (Explizite Nutzer-Anweisung; overrides das Default-Verhalten „nur PR auf Nachfrage".)
+5. **Release cutten — automatisch nach jedem Merge.** Nach dem Merge eines Feature-PRs von aktuellem `main` einen Release-Branch ziehen, `node build.js` ausführen (bumpt Version, schreibt `js/buildinfo.js`, leert `changes.txt`, bumpt SW-Cache), committen, Release-PR erstellen und ebenfalls auto-mergen — erst dann wird die Version in der App sichtbar (GitHub Pages deployt `main` automatisch). Ausnahme: trägt der Feature-Branch die Versionierung bereits selbst (wie beim Initial-Release), entfällt der separate Release-PR.
+6. **Update this file** — if the change affects architecture, conventions, or workflow.
 
 ## Key conventions
 
