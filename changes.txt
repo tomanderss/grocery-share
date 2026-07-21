@@ -1,0 +1,1 @@
+Prozent-Editor: Regler lassen sich per Schloss sperren — gesperrte Werte bleiben stehen, nur die offenen gleichen sich ab, der letzte offene nimmt automatisch den Rest

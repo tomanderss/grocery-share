@@ -252,6 +252,7 @@ function setQuickSplit(item, mode) {
       itemId: item.id,
       // beim Öffnen auf Summe 100 normalisieren, damit die Regler stimmig stehen
       pcts: proportionalSplit(item.split, pids),
+      locked: {}, // pid → true: Wert steht fest, nur offene Regler gleichen sich ab
     };
     return;
   }
@@ -282,7 +283,27 @@ function splitLabel(item) {
 function onSplitSlider(pid, ev) {
   const ed = state.splitEditor;
   if (!ed) return;
-  ed.pcts = rebalanceSplit(ed.pcts, pid, ev.target.value, personIds());
+  ed.pcts = rebalanceSplit(ed.pcts, pid, ev.target.value, personIds(), ed.locked);
+  // geklemmte Eingabe (gesperrte Werte brauchen Platz) sofort im DOM spiegeln,
+  // sonst bleibt der Browser-Slider optisch über dem Maximum stehen
+  ev.target.value = ed.pcts[pid];
+}
+
+// Schloss je Regler: gesperrte Werte bleiben bei Bewegungen stehen. Der letzte
+// offene Regler ist nicht sperrbar — er nimmt automatisch den Rest auf 100 %.
+function toggleLock(pid) {
+  const ed = state.splitEditor;
+  if (!ed) return;
+  if (!ed.locked[pid]) {
+    const unlocked = personIds().filter((id) => !ed.locked[id]);
+    if (unlocked.length <= 1) return;
+    ed.locked[pid] = true;
+    // sind jetzt alle bis auf einen gesperrt, bekommt der Offene exakt den Rest
+    const open = personIds().filter((id) => !ed.locked[id]);
+    if (open.length === 1) ed.pcts = rebalanceSplit(ed.pcts, open[0], ed.pcts[open[0]], personIds(), ed.locked);
+  } else {
+    delete ed.locked[pid];
+  }
 }
 
 // Sicherheitsnetz beim Übernehmen: skaliert auf exakt 100 % (nach
@@ -905,7 +926,7 @@ const app = createApp({
       addManualReceipt, onFilePicked, confirmAnalyze, openReceipt, deleteReceipt,
       openOriginals, openPdf,
       addItem, removeItem, onPriceInput, onTotalInput, setQuickSplit, splitMode, splitLabel,
-      applySplitEditor, editorResult, onSplitSlider, setKind, finalizeReceipt, reopenReceipt, discardChanges,
+      applySplitEditor, editorResult, onSplitSlider, toggleLock, setKind, finalizeReceipt, reopenReceipt, discardChanges,
       addPerson, removePerson,
       summaryFor, copySummary, summaryToTSV, shiftMonth,
       sendChat, toggleVoice,
@@ -1334,13 +1355,21 @@ const app = createApp({
     <div v-if="state.splitEditor" class="modal-bg" @click.self="state.splitEditor = null">
       <div class="modal">
         <h3>Aufteilung in Prozent</h3>
-        <div v-for="p in state.settings.persons" :key="p.id" class="split-slider-row">
-          <div class="ssr-head"><span>{{ p.name }}</span><b>{{ state.splitEditor.pcts[p.id] }} %</b></div>
-          <input type="range" min="0" max="100" step="5" :value="state.splitEditor.pcts[p.id]" @input="onSplitSlider(p.id, $event)">
+        <div v-for="p in state.settings.persons" :key="p.id" class="split-slider-row" :class="{ locked: state.splitEditor.locked[p.id] }">
+          <div class="ssr-head">
+            <span>{{ p.name }}</span>
+            <span class="ssr-right">
+              <b>{{ state.splitEditor.pcts[p.id] }} %</b>
+              <button class="iconbtn ssr-lock" :class="{ accent: state.splitEditor.locked[p.id] }" @click="toggleLock(p.id)"
+                :title="state.splitEditor.locked[p.id] ? 'Wert entsperren' : 'Wert sperren'"
+                v-html="ic(state.splitEditor.locked[p.id] ? 'lock' : 'lockOpen', 17)"></button>
+            </span>
+          </div>
+          <input type="range" min="0" max="100" step="5" :value="state.splitEditor.pcts[p.id]" :disabled="state.splitEditor.locked[p.id]" @input="onSplitSlider(p.id, $event)">
         </div>
         <div class="split-preview">
           {{ state.settings.persons.filter((p) => editorResult()[p.id] > 0).map((p) => p.name + ' ' + editorResult()[p.id] + ' %').join(' / ') }}
-          <div class="hint" style="margin-top:4px">Die übrigen Regler gleichen sich automatisch ab — zusammen immer 100 %.</div>
+          <div class="hint" style="margin-top:4px">Offene Regler gleichen sich automatisch ab — zusammen immer 100 %. Das Schloss friert einen Wert ein; der letzte offene Regler nimmt den Rest.</div>
         </div>
         <div class="modal-actions">
           <button class="btn btn-ghost" @click="state.splitEditor = null">Abbrechen</button>

@@ -194,6 +194,20 @@ test.describe('Mehrere Personen', () => {
     const sliderVals = await page.locator('.split-slider-row input').evaluateAll((els) => els.map((el) => Number(el.value)));
     expect(sliderVals[0]).toBe(20);
     expect(sliderVals[1] + sliderVals[2]).toBe(80);
+
+    // Schloss: gesperrter Wert bleibt stehen, der Slider ist deaktiviert
+    await page.locator('.ssr-lock').nth(1).click();
+    await expect(page.locator('.split-slider-row input').nth(1)).toBeDisabled();
+    const lockedVal = await page.locator('.split-slider-row input').nth(1).evaluate((el) => Number(el.value));
+    await page.locator('.split-slider-row input').first().evaluate((el) => {
+      el.value = '5';
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await expect(page.locator('.split-slider-row .ssr-head b').first()).toHaveText('5 %');
+    const afterLock = await page.locator('.split-slider-row input').evaluateAll((els) => els.map((el) => Number(el.value)));
+    expect(afterLock[1]).toBe(lockedVal);
+    expect(afterLock[0] + afterLock[1] + afterLock[2]).toBe(100);
+    await page.locator('.ssr-lock').nth(1).click(); // wieder entsperren
     await page.locator('.modal .btn-primary').click();
 
     // Auswertung hat drei Personen-Spalten
