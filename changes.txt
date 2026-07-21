@@ -1,0 +1,5 @@
+Datumsfeld im Bon-Formular passt sich jetzt sauber ins Layout ein (ragte vorher aus dem Bildschirm)
+Bearbeiten eines ausgewerteten Bons speichert nur noch lokal („Änderungen speichern") — komplett kostenlos, keine neue KI-Analyse
+Jede KI-Analyse muss jetzt explizit bestätigt werden, mit Kostenschätzung aus deinen letzten Analysen
+Neuer Button „Neu analysieren" am Bon (mit Warnhinweis) für den seltenen Fall, dass die KI wirklich nochmal ranmuss
+Kostenhinweis im KI-Chat ergänzt

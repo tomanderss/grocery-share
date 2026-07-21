@@ -44,6 +44,8 @@ const state = reactive({
   currentId: null,
   analyzing: false,
   analyzeError: '',
+  analyzeConfirm: null,  // { prepared, forReceiptId, estText } — Kosten-Bestätigung vor JEDEM KI-Aufruf
+
   chatInput: '',
   chatBusy: false,
   listening: false,
@@ -178,19 +180,26 @@ function finalizeReceipt() {
   });
   r.status = 'final';
   if (state.settings.learningEnabled) {
-    state.rules = learnFromReceipt(state.rules, r, Date.now(), personIds());
-    persistRules();
+    // Beim ERSTEN Abschluss lernen alle Positionen; beim erneuten Speichern nur
+    // die manuell angefassten (sonst zählt jedes Speichern die Statistik hoch).
+    const learnItems = r.wasFinal ? r.items.filter((i) => i.touched) : r.items;
+    if (learnItems.length) {
+      state.rules = learnFromReceipt(state.rules, { items: learnItems }, Date.now(), personIds());
+      persistRules();
+    }
   }
+  r.items.forEach((i) => { i.touched = false; });
   persistReceipts();
-  log('bon', 'finalized', { items: r.items.length, store: r.store });
+  log('bon', 'finalized', { items: r.items.length, store: r.store, wasFinal: !!r.wasFinal });
   state.screen = 'summary';
-  toast('Bon abgeschlossen — Zuordnungen gelernt');
+  toast(r.wasFinal ? 'Änderungen lokal gespeichert — keine KI-Kosten' : 'Bon abgeschlossen — Zuordnungen gelernt');
 }
 
 function reopenReceipt() {
   const r = currentReceipt();
   if (!r) return;
   r.status = 'draft';
+  r.wasFinal = true; // UI zeigt dann „Änderungen speichern" statt „Abschließen"
   persistReceipts();
   state.screen = 'review';
 }
@@ -215,6 +224,7 @@ function setQuickSplit(item, mode) {
     return;
   }
   item.needsReview = false;
+  item.touched = true; // fließt beim nächsten Speichern ins Lernen ein
   persistReceipts();
 }
 
@@ -243,6 +253,7 @@ function applySplitEditor() {
     const p1 = Math.min(100, Math.max(0, Math.round(ed.p1pct)));
     item.split = normalizeSplit({ [pids[0]]: p1, [pids[1]]: 100 - p1 }, pids);
     item.needsReview = false;
+    item.touched = true;
     persistReceipts();
   }
   state.splitEditor = null;
@@ -263,7 +274,10 @@ function setKind(item, kind) {
 }
 
 // ── Analyse (Foto/Datei → Claude) ────────────────────────────────────────────
-async function onFilePicked(ev) {
+// Jeder KI-Aufruf kostet Guthaben — deshalb wird NIE direkt analysiert, sondern
+// erst ein Bestätigungsdialog mit Kostenschätzung gezeigt (Ø der letzten
+// Analysen). forReceiptId gesetzt = bewusste NEU-Analyse eines bestehenden Bons.
+async function onFilePicked(ev, forReceiptId = null) {
   const file = ev.target.files?.[0];
   ev.target.value = '';
   if (!file) return;
@@ -273,20 +287,63 @@ async function onFilePicked(ev) {
     state.settingsOpen.ki = true;
     return;
   }
+  try {
+    const prepared = await prepareFile(file);
+    const avg = avgAnalysisCostUsd(state.receipts);
+    state.analyzeConfirm = {
+      prepared,
+      forReceiptId,
+      estText: avg > 0
+        ? `${formatCost(avg)} (Ø deiner letzten Analysen)`
+        : 'wenige Cent (je nach Modell und Bon-Länge)',
+    };
+  } catch (e) {
+    toast(e.message || String(e), 'warn');
+  }
+}
+
+async function confirmAnalyze() {
+  const job = state.analyzeConfirm;
+  state.analyzeConfirm = null;
+  if (!job) return;
   state.analyzing = true;
   state.analyzeError = '';
   try {
-    const prepared = await prepareFile(file);
     const { data: result, usage } = await analyzeReceipt({
       settings: state.settings,
-      file: prepared,
+      file: job.prepared,
       ruleLines: rulesForPrompt(state.rules, state.settings.persons, state.settings.categories),
     });
-    const r = buildDraftFromAnalysis(result, usage);
-    trackSpend(r.apiCost?.usd);
+    const apiCost = usage
+      ? { usd: costUsd(usage.model, usage.inputTokens, usage.outputTokens), ...usage }
+      : null;
+    let r;
+    if (job.forReceiptId) {
+      // Neu-Analyse: bestehenden Bon ersetzen, Kosten pro Bon KUMULIEREN.
+      r = state.receipts.find((x) => x.id === job.forReceiptId);
+      if (!r) return;
+      r.items = itemsFromAnalysis(result);
+      if (result.store) r.store = result.store;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(result.date || '')) r.date = result.date;
+      r.totalCents = toCents(result.total);
+      r.notes = result.notes || '';
+      if (apiCost) {
+        r.apiCost = {
+          ...apiCost,
+          usd: (r.apiCost?.usd || 0) + apiCost.usd,
+          inputTokens: (r.apiCost?.inputTokens || 0) + apiCost.inputTokens,
+          outputTokens: (r.apiCost?.outputTokens || 0) + apiCost.outputTokens,
+        };
+      }
+      r.status = 'draft';
+      persistReceipts();
+    } else {
+      r = buildDraftFromAnalysis(result, usage);
+    }
+    trackSpend(apiCost?.usd);
     state.currentId = r.id;
     state.screen = 'review';
-    log('bon', 'analyzed', { items: r.items.length, store: r.store });
+    log('bon', job.forReceiptId ? 'reanalyzed' : 'analyzed', { items: r.items.length, store: r.store });
     toast(`${r.items.length} Positionen erkannt — bitte prüfen`);
   } catch (e) {
     state.analyzeError = e.message || String(e);
@@ -336,7 +393,9 @@ function loadImage(file) {
   });
 }
 
-function buildDraftFromAnalysis(result, usage = null) {
+// Positionsliste aus einem Analyse-Ergebnis bauen (inkl. Regel-Anwendung) —
+// genutzt für neue Bons UND für die Neu-Analyse bestehender Bons.
+function itemsFromAnalysis(result) {
   const pids = personIds();
   let items = (result.items || []).map((it) => {
     let split = evenSplit(pids);
@@ -365,8 +424,11 @@ function buildDraftFromAnalysis(result, usage = null) {
   });
   // Gelernte Regeln schlagen die KI-Vorschläge (unscharfes Matching + häufigste
   // Zuordnung; ruleInfo trägt die Begründung in die Review-Ansicht).
-  items = applyRules(items, state.rules, pids, state.settings.persons)
+  return applyRules(items, state.rules, pids, state.settings.persons)
     .map((i) => (i.fromRule ? { ...i, needsReview: false } : i));
+}
+
+function buildDraftFromAnalysis(result, usage = null) {
   return newDraft({
     store: result.store || '',
     date: /^\d{4}-\d{2}-\d{2}$/.test(result.date || '') ? result.date : new Date().toISOString().slice(0, 10),
@@ -375,7 +437,7 @@ function buildDraftFromAnalysis(result, usage = null) {
     apiCost: usage
       ? { usd: costUsd(usage.model, usage.inputTokens, usage.outputTokens), ...usage }
       : null,
-    items,
+    items: itemsFromAnalysis(result),
   });
 }
 
@@ -726,7 +788,7 @@ const app = createApp({
       setCreditAnchor,
       personIds,
       go: (screen) => { state.screen = screen; if (screen === 'chat') queueMicrotask(scrollChat); },
-      addManualReceipt, onFilePicked, openReceipt, deleteReceipt,
+      addManualReceipt, onFilePicked, confirmAnalyze, openReceipt, deleteReceipt,
       addItem, removeItem, onPriceInput, onTotalInput, setQuickSplit, splitMode, splitLabel,
       applySplitEditor, setKind, finalizeReceipt, reopenReceipt,
       summaryFor, copySummary, summaryToTSV, shiftMonth,
@@ -850,7 +912,7 @@ const app = createApp({
             <button class="iconbtn small" @click="removeItem(item)" v-html="ic('trash', 18)" aria-label="Position löschen"></button>
           </div>
           <div class="item-controls" v-if="item.kind === 'normal'">
-            <select class="cat-select" v-model="item.categoryId" @change="persistReceipts">
+            <select class="cat-select" v-model="item.categoryId" @change="item.touched = true; persistReceipts()">
               <option v-for="c in state.settings.categories" :key="c.id" :value="c.id">{{ c.name }}</option>
             </select>
             <div class="split-btns">
@@ -880,8 +942,13 @@ const app = createApp({
 
       <div class="review-actions">
         <button class="btn btn-danger-ghost" @click="deleteReceipt(receipt)">Löschen</button>
-        <button class="btn btn-primary btn-big" @click="finalizeReceipt"><span v-html="ic('check', 20)"></span> Abschließen & auswerten</button>
+        <button class="btn btn-primary btn-big" @click="finalizeReceipt"><span v-html="ic('check', 20)"></span> {{ receipt.wasFinal ? 'Änderungen speichern' : 'Abschließen & auswerten' }}</button>
       </div>
+      <div class="save-hint"><span v-html="ic('info', 15)"></span> Speichern und Auswerten sind kostenlos — alles passiert lokal auf dem Gerät. Nur „Neu analysieren" ruft die KI auf.</div>
+      <label class="btn btn-ghost wide reanalyze" :class="{ disabled: state.analyzing }">
+        <span v-html="ic('refresh', 18)"></span> {{ state.analyzing ? 'Analysiere …' : 'Neu analysieren (KI, kostenpflichtig) …' }}
+        <input type="file" accept="image/*,application/pdf" hidden @change="onFilePicked($event, receipt.id)" :disabled="state.analyzing">
+      </label>
     </main>
 
     <!-- ═══ SUMMARY (Auswertung eines Bons) ═══ -->
@@ -1003,6 +1070,7 @@ const app = createApp({
         <input v-model="state.chatInput" @keyup.enter="sendChat" placeholder="Nachricht oder Wunsch …" :disabled="state.chatBusy">
         <button class="iconbtn accent" @click="sendChat" :disabled="state.chatBusy || !state.chatInput.trim()" v-html="ic('send')" aria-label="Senden"></button>
       </div>
+      <div class="chat-cost-hint">Jede Nachricht ruft die Claude-API auf und verbraucht etwas Guthaben (deutlich weniger als eine Bon-Analyse).</div>
     </main>
 
     <!-- ═══ EINSTELLUNGEN ═══ -->
@@ -1111,6 +1179,18 @@ const app = createApp({
     </main>
 
     <!-- ═══ Overlays ═══ -->
+    <div v-if="state.analyzeConfirm" class="modal-bg" @click.self="state.analyzeConfirm = null">
+      <div class="modal">
+        <h3>KI-Analyse starten?</h3>
+        <p>Diese Aktion ruft die Claude-API auf und <b>verbraucht Guthaben</b>: {{ state.analyzeConfirm.estText }}.</p>
+        <p v-if="state.analyzeConfirm.forReceiptId" class="reanalyze-warn"><b>Achtung:</b> Die Neu-Analyse ersetzt alle Positionen und Zuordnungen dieses Bons. Einzelne Korrekturen kannst du auch kostenlos direkt in den Positionen machen.</p>
+        <div class="modal-actions">
+          <button class="btn btn-ghost" @click="state.analyzeConfirm = null">Abbrechen</button>
+          <button class="btn btn-primary" @click="confirmAnalyze">Ja, analysieren</button>
+        </div>
+      </div>
+    </div>
+
     <div v-if="state.splitEditor" class="modal-bg" @click.self="state.splitEditor = null">
       <div class="modal">
         <h3>Aufteilung in Prozent</h3>
