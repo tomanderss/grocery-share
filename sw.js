@@ -3,7 +3,7 @@
 // GET-Assets stale-while-revalidate, Fremd-Origin (api.anthropic.com) wird
 // durchgereicht. Precache EINZELN (Promise.allSettled) + atomarer Swap.
 // Cache-Version bumpt build.js pro Release. JEDES neue js/-Modul MUSS in ASSETS.
-const CACHE = 'grocery-share-v0.5';
+const CACHE = 'grocery-share-v0.6';
 const ASSETS = [
   './index.html',
   './css/styles.css',
