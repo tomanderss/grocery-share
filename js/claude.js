@@ -117,14 +117,20 @@ function extractionSchema(settings) {
   };
 }
 
-function extractionPrompt(settings, ruleLines) {
+function extractionPrompt(settings, ruleLines, fileCount = 1) {
   const cats = settings.categories.map((c) => `- ${c.id}: ${c.name}`).join('\n');
   const persons = settings.persons.map((p) => `- ${p.id}: ${p.name}`).join('\n');
   const rules = ruleLines.length
     ? `\nBisher gelernte Zuordnungen (Produkt → Kategorie, Aufteilung). Nutze sie, um auch ähnliche neue Produkte im selben Stil zuzuordnen:\n${ruleLines.map((l) => `- ${l}`).join('\n')}`
     : '';
+  const multiPage = fileCount > 1 ? `
+MEHRTEILIGER BON — alle ${fileCount} Aufnahmen zeigen EINEN einzigen Bon (in Reihenfolge fotografiert, z.B. ein langer Bon in Abschnitten):
+- Die Aufnahmen können sich am Übergang ÜBERLAPPEN: das Ende einer Aufnahme zeigt oft dieselben Zeilen wie der Anfang der nächsten. Prüfe jeden Übergang genau — identische Zeilen (gleicher Artikel, gleicher Preis, gleiche Reihenfolge) sind DIESELBE Position und kommen nur EINMAL in die Liste.
+- Eine am Rand abgeschnittene Zeile steht meist vollständig auf der Nachbar-Aufnahme — nutze die besser lesbare Version.
+- Ergebnis ist EINE fortlaufende Positionsliste und EIN Gesamtbetrag (steht üblicherweise nur auf der letzten Aufnahme).
+` : '';
   return `Du analysierst einen deutschen Kassenbon (typisch REWE, EDEKA, Rossmann, ALDI, dm, Lidl).
-
+${multiPage}
 Extrahiere ALLE Positionen einzeln und vollständig:
 - RABATTE — bei JEDER Position konsequent prüfen, nie eine überspringen: Gehe den Bon Zeile für Zeile durch. Jede Abzugszeile ("Rabatt", "RABATT", "AKTION", "Coupon", "Preisvorteil", "Treue", ein negativer Betrag o.ä.) direkt unter oder neben einem Artikel gehört zu GENAU diesem Artikel: rechne sie in dessen totalPrice ein (Preis NACH Rabatt) UND trage den Rabattbetrag als positives discount-Feld dieser Position ein. Rabattzeilen sind NIE eine eigene Position.
 - Nur wenn ein Rabatt eindeutig für den GESAMTEN Einkauf gilt (z.B. "5% auf alles", Mitarbeiterrabatt, Coupon ohne Artikelbezug am Bon-Ende): lege dafür eine eigene Position an (Name z.B. "Gesamtrabatt 5%", negativer totalPrice, discount 0, kind normal, assignment shared).
@@ -144,24 +150,34 @@ ${rules}
 Wenn du keine belastbare Vermutung zur Person hast: assignment=shared für typische gemeinsame Lebensmittel, sonst unknown.`;
 }
 
-// file: { base64, mediaType } — Bilder als image-Block, PDFs als document-Block.
-// Rückgabe: { data, usage } (usage → Kosten-Tracking am Bon).
-export async function analyzeReceipt({ settings, file, ruleLines }) {
-  const source = { type: 'base64', media_type: file.mediaType, data: file.base64 };
-  const block = file.mediaType === 'application/pdf'
-    ? { type: 'document', source }
-    : { type: 'image', source };
-  log('api', 'analyzeReceipt start', { model: settings.model, mediaType: file.mediaType });
+// files: [{ base64, mediaType }, ...] — Bilder als image-Blocks, PDFs als
+// document-Blocks. MEHRERE Dateien = mehrere Seiten/Fotos DESSELBEN Bons, die
+// zu einer Positionsliste zusammengeführt werden (Überlapp-Deduplizierung
+// passiert im Prompt). Rückgabe: { data, usage } (usage → Kosten-Tracking).
+export async function analyzeReceipt({ settings, files, ruleLines }) {
+  const blocks = files.flatMap((file, i) => {
+    const source = { type: 'base64', media_type: file.mediaType, data: file.base64 };
+    const block = file.mediaType === 'application/pdf'
+      ? { type: 'document', source }
+      : { type: 'image', source };
+    return files.length > 1
+      ? [{ type: 'text', text: `Aufnahme ${i + 1} von ${files.length}:` }, block]
+      : [block];
+  });
+  const task = files.length > 1
+    ? `Diese ${files.length} Aufnahmen zeigen EINEN EINZIGEN Kassenbon (mehrere Seiten/Abschnitte, in Reihenfolge fotografiert). Führe sie zu EINER Positionsliste zusammen.`
+    : 'Analysiere diesen Kassenbon.';
+  log('api', 'analyzeReceipt start', { model: settings.model, files: files.length });
   return callClaude({
     apiKey: settings.apiKey,
     body: {
       model: settings.model,
       max_tokens: 16000,
-      system: extractionPrompt(settings, ruleLines),
+      system: extractionPrompt(settings, ruleLines, files.length),
       output_config: { format: { type: 'json_schema', schema: extractionSchema(settings) } },
       messages: [{
         role: 'user',
-        content: [block, { type: 'text', text: 'Analysiere diesen Kassenbon.' }],
+        content: [...blocks, { type: 'text', text: task }],
       }],
     },
   });
