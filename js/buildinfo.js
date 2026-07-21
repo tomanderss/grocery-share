@@ -1,8 +1,15 @@
 // Auto-generiert von build.js — nicht manuell bearbeiten!
-export const BUILD      = '0.13';
-export const BUILD_HASH = '3fa7193';
+export const BUILD      = '0.14';
+export const BUILD_HASH = 'be309d8';
 
 export const CHANGELOG = [
+  {
+    "version": "0.14",
+    "date": "21.07.2026",
+    "changes": [
+      "Button-Zeile im Bon-Review repariert: Speichern in voller Breite, darunter Verwerfen und Löschen — nichts ragt mehr aus dem Bildschirm"
+    ]
+  },
   {
     "version": "0.13",
     "date": "21.07.2026",
