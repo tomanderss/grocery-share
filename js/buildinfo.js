@@ -1,8 +1,15 @@
 // Auto-generiert von build.js — nicht manuell bearbeiten!
-export const BUILD      = '0.1';
-export const BUILD_HASH = '95bbd87';
+export const BUILD      = '0.2';
+export const BUILD_HASH = '1eb6b08';
 
 export const CHANGELOG = [
+  {
+    "version": "0.2",
+    "date": "21.07.2026",
+    "changes": [
+      "Einstellungen-Icon durch ein echtes Zahnrad ersetzt (sah vorher aus wie eine Sonne)"
+    ]
+  },
   {
     "version": "0.1",
     "date": "21.07.2026",
