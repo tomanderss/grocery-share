@@ -1,8 +1,15 @@
 // Auto-generiert von build.js — nicht manuell bearbeiten!
-export const BUILD      = '0.9';
-export const BUILD_HASH = '88ffba2';
+export const BUILD      = '0.10';
+export const BUILD_HASH = '5e32e02';
 
 export const CHANGELOG = [
+  {
+    "version": "0.10",
+    "date": "21.07.2026",
+    "changes": [
+      "Startseite aufgeräumt: der Untertitel zeigt nur noch die Personen (Erklärsatz entfernt)"
+    ]
+  },
   {
     "version": "0.9",
     "date": "21.07.2026",
