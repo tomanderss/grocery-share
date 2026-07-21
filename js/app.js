@@ -1102,10 +1102,10 @@ const app = createApp({
       <button class="btn btn-ghost wide" @click="addItem"><span v-html="ic('plus', 18)"></span> Position hinzufügen</button>
 
       <div class="review-actions">
+        <button class="btn btn-primary btn-big" @click="finalizeReceipt"><span v-html="ic('check', 20)"></span> {{ receipt.wasFinal ? 'Änderungen speichern' : 'Abschließen & auswerten' }}</button>
+        <button class="btn btn-ghost" @click="discardChanges">Verwerfen</button>
         <!-- Bei neuen Entwürfen wäre Löschen == Verwerfen, daher nur bei ausgewerteten Bons -->
         <button v-if="receipt.wasFinal" class="btn btn-danger-ghost" @click="deleteReceipt(receipt)">Löschen</button>
-        <button class="btn btn-ghost" @click="discardChanges">Verwerfen</button>
-        <button class="btn btn-primary btn-big" @click="finalizeReceipt"><span v-html="ic('check', 20)"></span> {{ receipt.wasFinal ? 'Änderungen speichern' : 'Abschließen & auswerten' }}</button>
       </div>
       <div class="save-hint"><span v-html="ic('info', 15)"></span> Speichern und Auswerten sind kostenlos — alles passiert lokal auf dem Gerät. Nur „Neu analysieren" ruft die KI auf.</div>
       <label class="btn btn-ghost wide reanalyze" :class="{ disabled: state.analyzing }">
