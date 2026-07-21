@@ -46,14 +46,27 @@ describe('mergeSettings', () => {
 });
 
 describe('Export / Import', () => {
-  test('Roundtrip erhält Bons, Regeln und Einstellungen', () => {
+  test('Roundtrip erhält Bons, Regeln, Einstellungen und Original-Dateien', () => {
     const settings = mergeSettings({ apiKey: 'sk-x' });
     const receipts = [{ id: 'bon_1', items: [] }];
     const rules = [{ key: 'cola', name: 'Cola', categoryId: 'einkaufen', split: { p1: 50, p2: 50 }, count: 1, updatedAt: 1 }];
-    const parsed = parseImportData(JSON.stringify(collectExportData(settings, receipts, rules)));
+    const attachments = [
+      { id: 'att_1', receiptId: 'bon_1', mediaType: 'image/jpeg', base64: 'QUJD', page: 1, createdAt: 1 },
+      { id: 'att_kaputt', receiptId: 'bon_1' }, // unvollständig → wird verworfen
+    ];
+    const parsed = parseImportData(JSON.stringify(collectExportData(settings, receipts, rules, null, attachments)));
     assert.equal(parsed.settings.apiKey, 'sk-x');
     assert.equal(parsed.receipts.length, 1);
     assert.equal(parsed.rules.length, 1);
+    assert.equal(parsed.attachments.length, 1);
+    assert.equal(parsed.attachments[0].id, 'att_1');
+  });
+
+  test('Sicherungen ohne attachments-Feld (vor v0.9) bleiben importierbar', () => {
+    const parsed = parseImportData(JSON.stringify(collectExportData(mergeSettings(null), [], [])));
+    assert.deepEqual(parsed.attachments, []);
+    const old = parseImportData('{"app":"grocery-share","settings":{},"receipts":[],"rules":[]}');
+    assert.deepEqual(old.attachments, []);
   });
 
   test('fremdes JSON wird abgelehnt', () => {

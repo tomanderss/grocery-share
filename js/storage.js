@@ -75,7 +75,7 @@ export function saveCredit(credit) { write(K.credit, credit); }
 // ── Backup / Export / Import ─────────────────────────────────────────────────
 // Der API-Key bleibt bewusst IM Export (persönliches Backup fürs eigene Gerät);
 // wer das Backup teilt, sollte das wissen — die UI weist darauf hin.
-export function collectExportData(settings, receipts, rules, credit = null) {
+export function collectExportData(settings, receipts, rules, credit = null, attachments = []) {
   return {
     app: 'grocery-share',
     schema: 1,
@@ -84,6 +84,9 @@ export function collectExportData(settings, receipts, rules, credit = null) {
     receipts,
     rules,
     credit,
+    // Original-Fotos/PDFs der Bons (aus IndexedDB, siehe attachments.js) —
+    // macht die Backup-Datei entsprechend groß, dafür ist sie vollständig.
+    attachments,
   };
 }
 
@@ -101,6 +104,9 @@ export function parseImportData(json) {
     credit: data.credit && typeof data.credit === 'object'
       ? { anchorUsd: data.credit.anchorUsd ?? null, anchorAt: data.credit.anchorAt || 0, spentUsd: data.credit.spentUsd || 0 }
       : { anchorUsd: null, anchorAt: 0, spentUsd: 0 },
+    attachments: Array.isArray(data.attachments)
+      ? data.attachments.filter((a) => a && a.id && a.receiptId && a.base64 && a.mediaType)
+      : [],
   };
 }
 
