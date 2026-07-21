@@ -1,8 +1,18 @@
 // Auto-generiert von build.js — nicht manuell bearbeiten!
-export const BUILD      = '0.4';
-export const BUILD_HASH = '85dd7ac';
+export const BUILD      = '0.5';
+export const BUILD_HASH = '550a420';
 
 export const CHANGELOG = [
+  {
+    "version": "0.5",
+    "date": "21.07.2026",
+    "changes": [
+      "Rabatte werden konsequenter erkannt: Positionsrabatte fließen in den Artikelpreis ein und werden als „inkl. … Rabatt\" an der Position angezeigt; Gesamtrabatte werden als eigene Position geführt",
+      "Auswertung mit Zwischensummen: je Kategorie zusätzlich eine „… gesamt\"-Zeile; bei Sonstiges stehen die Artikelnamen in Klammern dabei",
+      "Gelernte Regeln matchen jetzt unscharf (z.B. „Puddingprotein\" trifft „Proteinpudding\") statt nur bei exaktem Wortlaut",
+      "Regeln merken sich alle bisherigen Zuordnungen als Wahrscheinlichkeit (z.B. 81 % nur Tom) — die häufigste wird vorausgewählt und die Verteilung als Begründung an der Position angezeigt"
+    ]
+  },
   {
     "version": "0.4",
     "date": "21.07.2026",
