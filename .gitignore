@@ -1,0 +1,10 @@
+# OS / Editor
+.DS_Store
+Thumbs.db
+*.log
+
+# Node (build.js braucht kein npm install — nur die Tests in test/ haben
+# echte Dependencies, siehe package.json)
+node_modules/
+test-results/
+playwright-report/
