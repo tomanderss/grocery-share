@@ -1,2 +1,0 @@
-Original-Fotos/PDFs werden jetzt lokal am Bon gespeichert: „Original ansehen" im Review und in der Auswertung zeigt jederzeit die Originaldateien zum Nachprüfen
-Die Original-Dateien sind im JSON-Backup enthalten (Export/Import) — die Sicherungsdatei wird dadurch entsprechend größer

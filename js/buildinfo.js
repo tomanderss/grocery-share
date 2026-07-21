@@ -1,8 +1,16 @@
 // Auto-generiert von build.js — nicht manuell bearbeiten!
-export const BUILD      = '0.8';
-export const BUILD_HASH = '73c915f';
+export const BUILD      = '0.9';
+export const BUILD_HASH = '88ffba2';
 
 export const CHANGELOG = [
+  {
+    "version": "0.9",
+    "date": "21.07.2026",
+    "changes": [
+      "Original-Fotos/PDFs werden jetzt lokal am Bon gespeichert: „Original ansehen\" im Review und in der Auswertung zeigt jederzeit die Originaldateien zum Nachprüfen",
+      "Die Original-Dateien sind im JSON-Backup enthalten (Export/Import) — die Sicherungsdatei wird dadurch entsprechend größer"
+    ]
+  },
   {
     "version": "0.8",
     "date": "21.07.2026",
