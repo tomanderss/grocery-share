@@ -1,8 +1,15 @@
 // Auto-generiert von build.js — nicht manuell bearbeiten!
-export const BUILD      = '0.6';
-export const BUILD_HASH = '95081d8';
+export const BUILD      = '0.7';
+export const BUILD_HASH = 'f9ea2c0';
 
 export const CHANGELOG = [
+  {
+    "version": "0.7",
+    "date": "21.07.2026",
+    "changes": [
+      "Einen Bon über mehrere Fotos/Seiten einscannen: beim Upload einfach mehrere Dateien auswählen — die KI führt alles zu einem Bon zusammen und erkennt überlappende Positionen an den Übergängen"
+    ]
+  },
   {
     "version": "0.6",
     "date": "21.07.2026",
