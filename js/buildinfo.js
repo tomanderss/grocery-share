@@ -1,8 +1,15 @@
 // Auto-generiert von build.js — nicht manuell bearbeiten!
-export const BUILD      = '0.12';
-export const BUILD_HASH = 'e3dcfeb';
+export const BUILD      = '0.13';
+export const BUILD_HASH = '3fa7193';
 
 export const CHANGELOG = [
+  {
+    "version": "0.13",
+    "date": "21.07.2026",
+    "changes": [
+      "„Verwerfen\" steht jetzt bei JEDEM Bon unten neben Speichern: bei bearbeiteten Bons stellt es den alten Stand wieder her, bei neuen Entwürfen löscht es den Entwurf, und hängen gebliebene Entwürfe werden wieder abgeschlossen"
+    ]
+  },
   {
     "version": "0.12",
     "date": "21.07.2026",
