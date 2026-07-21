@@ -914,7 +914,7 @@ const app = createApp({
       <div class="home-head">
         <div>
           <h1 class="app-title">Grocery Share</h1>
-          <div class="app-sub">Kassenbons fair aufteilen — {{ state.settings.persons.map((p) => p.name).join(state.settings.persons.length > 2 ? ', ' : ' & ') }}</div>
+          <div class="app-sub">{{ state.settings.persons.map((p) => p.name).join(state.settings.persons.length > 2 ? ', ' : ' & ') }}</div>
         </div>
         <button class="iconbtn" @click="go('settings')" v-html="ic('settings')" aria-label="Einstellungen"></button>
       </div>
