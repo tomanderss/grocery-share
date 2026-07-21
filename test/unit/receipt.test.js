@@ -1,8 +1,8 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  toCents, formatCents, evenSplit, isEvenSplit, normalizeSplit, splitAmount,
-  effectiveItem, receiptSummary, itemsTotal, monthSummary, receiptMonth,
+  toCents, formatCents, evenSplit, isEvenSplit, normalizeSplit, proportionalSplit,
+  splitAmount, effectiveItem, receiptSummary, itemsTotal, monthSummary, receiptMonth,
 } from '../../js/receipt.js';
 
 const SETTINGS = {
@@ -166,6 +166,60 @@ describe('receiptSummary — das Beispiel aus der Spezifikation', () => {
   test('itemsTotal summiert effektive Positionsbeträge', () => {
     const r = { items: [item({ priceCents: 100 }), item({ id: 'i2', priceCents: 2000, kind: 'deposit_return' })] };
     assert.equal(itemsTotal(r, SETTINGS), 100 - 2000);
+  });
+});
+
+describe('beliebig viele Personen', () => {
+  const PIDS3 = ['p1', 'p2', 'p3'];
+  const S3 = {
+    ...SETTINGS,
+    persons: [{ id: 'p1', name: 'Tom' }, { id: 'p2', name: 'Tara' }, { id: 'p3', name: 'Lisa' }],
+  };
+
+  test('evenSplit verteilt 100 % deterministisch auf N Personen', () => {
+    assert.deepEqual(evenSplit(PIDS3), { p1: 34, p2: 33, p3: 33 });
+    assert.deepEqual(evenSplit(['a', 'b', 'c', 'd', 'e']), { a: 20, b: 20, c: 20, d: 20, e: 20 });
+  });
+
+  test('isEvenSplit erkennt nur die kanonische Gleichverteilung', () => {
+    assert.equal(isEvenSplit({ p1: 34, p2: 33, p3: 33 }, PIDS3), true);
+    assert.equal(isEvenSplit({ p1: 40, p2: 30, p3: 30 }, PIDS3), false);
+  });
+
+  test('splitAmount bleibt bei drei Personen cent-genau', () => {
+    const shares = splitAmount(1000, { p1: 34, p2: 33, p3: 33 }, PIDS3);
+    assert.equal(shares.p1 + shares.p2 + shares.p3, 1000);
+    assert.deepEqual(splitAmount(300, { p1: 50, p2: 30, p3: 20 }, PIDS3), { p1: 150, p2: 90, p3: 60 });
+  });
+
+  test('proportionalSplit skaliert freie Slider-Werte auf exakt 100', () => {
+    assert.deepEqual(proportionalSplit({ p1: 50, p2: 50, p3: 0 }, PIDS3), { p1: 50, p2: 50, p3: 0 });
+    // 60/60/30 → 40/40/20
+    assert.deepEqual(proportionalSplit({ p1: 60, p2: 60, p3: 30 }, PIDS3), { p1: 40, p2: 40, p3: 20 });
+    // Drittel: Summe muss exakt 100 sein
+    const thirds = proportionalSplit({ p1: 10, p2: 10, p3: 10 }, PIDS3);
+    assert.equal(thirds.p1 + thirds.p2 + thirds.p3, 100);
+    // alles 0 → Gleichverteilung
+    assert.deepEqual(proportionalSplit({}, PIDS3), evenSplit(PIDS3));
+  });
+
+  test('receiptSummary: teilen-Zeile für alle drei, einzeln je Anteil', () => {
+    const r = {
+      items: [
+        item({ priceCents: 3000 /* geteilt */, split: { p1: 34, p2: 33, p3: 33 } }),
+        item({ id: 'b', priceCents: 900, split: { p1: 50, p2: 30, p3: 20 } }),
+      ],
+    };
+    const s = receiptSummary(r, S3);
+    const row = s.rows.find((x) => x.categoryId === 'einkaufen');
+    assert.equal(row.sharedTotal, 3000);
+    assert.deepEqual(row.single, { p1: 450, p2: 270, p3: 180 });
+    assert.equal(s.personTotals.p1 + s.personTotals.p2 + s.personTotals.p3, 3900);
+  });
+
+  test('Pfand wird auf alle Personen gleichmäßig gezwungen', () => {
+    const e = effectiveItem(item({ kind: 'deposit', priceCents: 100, split: { p1: 100 } }), S3);
+    assert.deepEqual(e.split, { p1: 34, p2: 33, p3: 33 });
   });
 });
 

@@ -10,7 +10,7 @@ import {
   applyImport, newId,
 } from './storage.js';
 import {
-  formatCents, toCents, evenSplit, normalizeSplit, isEvenSplit,
+  formatCents, toCents, evenSplit, normalizeSplit, isEvenSplit, proportionalSplit,
   receiptSummary, monthSummary, itemsTotal, receiptMonth,
 } from './receipt.js';
 import {
@@ -51,11 +51,12 @@ const state = reactive({
   listening: false,
   toast: null,
   confirmDialog: null,   // { text, onYes }
-  splitEditor: null,     // { itemId, p1pct }
+  splitEditor: null,     // { itemId, pcts: {pid: n} } — ein Slider je Person
   whatsNewOpen: false,
   updateReady: false,
   settingsOpen: { ki: false, personen: false, kategorien: false, regeln: false, daten: false, info: false },
   newCategoryName: '',
+  newPersonName: '',
 });
 
 // Alte Regel-Form (bis v0.4: nur letzter Split) auf die Statistik-Form migrieren.
@@ -220,7 +221,10 @@ function setQuickSplit(item, mode) {
   if (mode === 'shared') item.split = evenSplit(pids);
   else if (pids.includes(mode)) item.split = Object.fromEntries(pids.map((pid) => [pid, pid === mode ? 100 : 0]));
   else {
-    state.splitEditor = { itemId: item.id, p1pct: item.split[pids[0]] ?? 50 };
+    state.splitEditor = {
+      itemId: item.id,
+      pcts: Object.fromEntries(pids.map((pid) => [pid, item.split[pid] ?? 0])),
+    };
     return;
   }
   item.needsReview = false;
@@ -238,9 +242,16 @@ function splitMode(item) {
 function splitLabel(item) {
   const pids = personIds();
   const mode = splitMode(item);
-  if (mode === 'shared') return 'geteilt 50 : 50';
+  if (mode === 'shared') return pids.length === 2 ? 'geteilt 50 : 50' : 'gleichmäßig geteilt';
   if (pids.includes(mode)) return `nur ${personName(mode)}`;
-  return pids.map((pid) => `${personName(pid)} ${item.split[pid] || 0}%`).join(' / ');
+  return pids.filter((pid) => (item.split[pid] || 0) > 0)
+    .map((pid) => `${personName(pid)} ${item.split[pid]}%`).join(' / ');
+}
+
+// Slider-Werte dürfen in beliebiger Summe stehen — beim Übernehmen wird
+// proportional auf exakt 100 % skaliert (Vorschau zeigt das Ergebnis live).
+function editorResult() {
+  return proportionalSplit(state.splitEditor?.pcts || {}, personIds());
 }
 
 function applySplitEditor() {
@@ -249,14 +260,31 @@ function applySplitEditor() {
   if (!ed || !r) return;
   const item = r.items.find((i) => i.id === ed.itemId);
   if (item) {
-    const pids = personIds();
-    const p1 = Math.min(100, Math.max(0, Math.round(ed.p1pct)));
-    item.split = normalizeSplit({ [pids[0]]: p1, [pids[1]]: 100 - p1 }, pids);
+    item.split = editorResult();
     item.needsReview = false;
     item.touched = true;
     persistReceipts();
   }
   state.splitEditor = null;
+}
+
+// ── Personen-Verwaltung ──────────────────────────────────────────────────────
+function addPerson() {
+  const name = state.newPersonName.trim();
+  if (!name) return;
+  state.settings.persons.push({ id: newId('p'), name });
+  state.newPersonName = '';
+  persistSettings();
+  toast(`${name} ist dabei — „teilen" heißt jetzt: gleichmäßig auf alle ${state.settings.persons.length}`);
+}
+
+function removePerson(p) {
+  if (state.settings.persons.length <= 2) { toast('Mindestens zwei Personen müssen bleiben', 'warn'); return; }
+  confirmAction(`${p.name} entfernen? Anteile von ${p.name} in bestehenden Bons werden beim nächsten Anzeigen auf die übrigen Personen umgelegt.`, () => {
+    state.settings.persons = state.settings.persons.filter((x) => x.id !== p.id);
+    persistSettings();
+    toast(`${p.name} entfernt`);
+  });
 }
 
 function setKind(item, kind) {
@@ -550,6 +578,19 @@ function applyAssistantAction(a) {
         persistSettings();
         return `Person „${old}“ heißt jetzt „${p.name}“`;
       }
+      case 'add_person': {
+        if (!a.name) return null;
+        state.settings.persons.push({ id: newId('p'), name: a.name.trim() });
+        persistSettings();
+        return `Person „${a.name.trim()}“ hinzugefügt`;
+      }
+      case 'remove_person': {
+        const p = state.settings.persons.find((x) => x.id === a.personId);
+        if (!p || state.settings.persons.length <= 2) return null;
+        state.settings.persons = state.settings.persons.filter((x) => x.id !== p.id);
+        persistSettings();
+        return `Person „${p.name}“ entfernt`;
+      }
       case 'rename_category': {
         const c = state.settings.categories.find((x) => x.id === a.categoryId);
         if (!c || !a.name) return null;
@@ -797,7 +838,8 @@ const app = createApp({
       go: (screen) => { state.screen = screen; if (screen === 'chat') queueMicrotask(scrollChat); },
       addManualReceipt, onFilePicked, confirmAnalyze, openReceipt, deleteReceipt,
       addItem, removeItem, onPriceInput, onTotalInput, setQuickSplit, splitMode, splitLabel,
-      applySplitEditor, setKind, finalizeReceipt, reopenReceipt,
+      applySplitEditor, editorResult, setKind, finalizeReceipt, reopenReceipt,
+      addPerson, removePerson,
       summaryFor, copySummary, summaryToTSV, shiftMonth,
       sendChat, toggleVoice,
       persistSettings, persistReceipts, applyTheme,
@@ -807,14 +849,11 @@ const app = createApp({
       confirmYes: () => { const d = state.confirmDialog; state.confirmDialog = null; d?.onYes?.(); },
       ruleLabel: (r) => ruleDistributionLabel(r, state.settings.persons),
       ruleCatName: (r) => categoryName(predictRule(r, personIds())?.categoryId),
+      // (splitPreview des alten Zwei-Personen-Editors ist durch editorResult ersetzt)
       // Artikelnamen in der Auswertung nur für Sammel-Kategorien (Sonstiges).
       showNames: (row) => {
         const c = state.settings.categories.find((x) => x.id === row.categoryId);
         return !!(c?.listItems || row.categoryId === 'sonstiges') && row.itemNames.length > 0;
-      },
-      splitPreview: (p1) => {
-        const pids = personIds();
-        return `${personName(pids[0])} ${Math.round(p1)}% / ${personName(pids[1])} ${100 - Math.round(p1)}%`;
       },
       kindLabel: (k) => (k === 'deposit' ? 'Pfand' : k === 'deposit_return' ? 'Leergut' : ''),
     };
@@ -839,7 +878,7 @@ const app = createApp({
       <div class="home-head">
         <div>
           <h1 class="app-title">Grocery Share</h1>
-          <div class="app-sub">Kassenbons fair aufteilen — {{ personName(personIds()[0]) }} & {{ personName(personIds()[1]) }}</div>
+          <div class="app-sub">Kassenbons fair aufteilen — {{ state.settings.persons.map((p) => p.name).join(state.settings.persons.length > 2 ? ', ' : ' & ') }}</div>
         </div>
         <button class="iconbtn" @click="go('settings')" v-html="ic('settings')" aria-label="Einstellungen"></button>
       </div>
@@ -923,14 +962,13 @@ const app = createApp({
               <option v-for="c in state.settings.categories" :key="c.id" :value="c.id">{{ c.name }}</option>
             </select>
             <div class="split-btns">
-              <button :class="{ active: splitMode(item) === personIds()[0] }" @click="setQuickSplit(item, personIds()[0])">{{ personName(personIds()[0]) }}</button>
-              <button :class="{ active: splitMode(item) === 'shared' }" @click="setQuickSplit(item, 'shared')">50:50</button>
-              <button :class="{ active: splitMode(item) === personIds()[1] }" @click="setQuickSplit(item, personIds()[1])">{{ personName(personIds()[1]) }}</button>
+              <button v-for="p in state.settings.persons" :key="p.id" :class="{ active: splitMode(item) === p.id }" @click="setQuickSplit(item, p.id)">{{ p.name }}</button>
+              <button :class="{ active: splitMode(item) === 'shared' }" @click="setQuickSplit(item, 'shared')">{{ personIds().length === 2 ? '50:50' : 'teilen' }}</button>
               <button :class="{ active: splitMode(item) === 'custom' }" @click="setQuickSplit(item, 'custom')">%</button>
             </div>
           </div>
           <div class="item-badges">
-            <span v-if="item.kind !== 'normal'" class="chip chip-accent">{{ kindLabel(item.kind) }} — immer 50:50, Kategorie {{ categoryName(state.settings.depositCategoryId) }}</span>
+            <span v-if="item.kind !== 'normal'" class="chip chip-accent">{{ kindLabel(item.kind) }} — immer gleichmäßig auf alle geteilt, Kategorie {{ categoryName(state.settings.depositCategoryId) }}</span>
             <span v-else class="chip">{{ splitLabel(item) }}</span>
             <span v-if="item.discountCents" class="chip chip-good">inkl. {{ fmt(item.discountCents) }} Rabatt</span>
             <span v-if="item.fromRule" class="chip chip-good" title="Aus gelernter Regel">gelernt ✓</span>
@@ -969,7 +1007,7 @@ const app = createApp({
           </div>
           <div class="sum-total">{{ fmt(summary.grandTotal) }}</div>
         </div>
-        <table class="sum-table">
+        <div class="table-scroll"><table class="sum-table">
           <thead><tr><th></th><th v-for="pid in personIds()" :key="pid">{{ personName(pid) }}</th></tr></thead>
           <tbody>
             <template v-for="row in summary.rows" :key="row.categoryId">
@@ -988,7 +1026,7 @@ const app = createApp({
             </template>
           </tbody>
           <tfoot><tr><td>Gesamt pro Person</td><td v-for="pid in personIds()" :key="pid" class="num strong">{{ fmt(summary.personTotals[pid]) }}</td></tr></tfoot>
-        </table>
+        </table></div>
         <div class="sum-actions">
           <button class="btn btn-ghost" @click="copySummary(summary, (receipt.store || 'Bon') + ' ' + formatDate(receipt.date))"><span v-html="ic('copy', 18)"></span> Tabelle kopieren</button>
           <button class="btn btn-ghost" @click="reopenReceipt"><span v-html="ic('edit', 18)"></span> Bearbeiten</button>
@@ -1013,7 +1051,7 @@ const app = createApp({
           </div>
           <div class="sum-total">{{ fmt(month.grandTotal) }}</div>
         </div>
-        <table class="sum-table">
+        <div class="table-scroll"><table class="sum-table">
           <thead><tr><th></th><th v-for="pid in personIds()" :key="pid">{{ personName(pid) }}</th></tr></thead>
           <tbody>
             <template v-for="row in month.rows" :key="row.categoryId">
@@ -1032,7 +1070,7 @@ const app = createApp({
             </template>
           </tbody>
           <tfoot><tr><td>Gesamt pro Person</td><td v-for="pid in personIds()" :key="pid" class="num strong">{{ fmt(month.personTotals[pid]) }}</td></tr></tfoot>
-        </table>
+        </table></div>
         <div class="sum-actions">
           <button class="btn btn-ghost" @click="copySummary(month, 'Monat ' + monthLabel(state.monthKey))"><span v-html="ic('copy', 18)"></span> Tabelle kopieren</button>
         </div>
@@ -1112,9 +1150,15 @@ const app = createApp({
       <div class="card acc" :class="{ open: state.settingsOpen.personen }">
         <button class="acc-head" @click="state.settingsOpen.personen = !state.settingsOpen.personen"><span v-html="ic('users', 20)"></span> Personen<span class="acc-arrow" v-html="ic('next', 16)"></span></button>
         <div class="acc-body" v-if="state.settingsOpen.personen">
-          <label v-for="p in state.settings.persons" :key="p.id">Person {{ p.id === personIds()[0] ? 1 : 2 }}
+          <div v-for="p in state.settings.persons" :key="p.id" class="cat-row">
             <input v-model="p.name" @change="persistSettings">
-          </label>
+            <button class="iconbtn small" @click="removePerson(p)" v-html="ic('trash', 16)" :disabled="state.settings.persons.length <= 2" aria-label="Person entfernen"></button>
+          </div>
+          <div class="cat-row">
+            <input v-model="state.newPersonName" placeholder="Neue Person …" @keyup.enter="addPerson">
+            <button class="iconbtn small accent" @click="addPerson" v-html="ic('plus', 18)" aria-label="Person hinzufügen"></button>
+          </div>
+          <div class="hint">„teilen" heißt immer: exakt gleichmäßig auf ALLE Personen. Pfand und Leergut werden ebenfalls auf alle gleichmäßig verteilt. Über den %-Knopf an jeder Position lässt sich jede Person einzeln prozentual beteiligen.</div>
         </div>
       </div>
 
@@ -1202,8 +1246,14 @@ const app = createApp({
     <div v-if="state.splitEditor" class="modal-bg" @click.self="state.splitEditor = null">
       <div class="modal">
         <h3>Aufteilung in Prozent</h3>
-        <div class="split-preview">{{ splitPreview(state.splitEditor.p1pct) }}</div>
-        <input type="range" min="0" max="100" step="5" v-model.number="state.splitEditor.p1pct">
+        <div v-for="p in state.settings.persons" :key="p.id" class="split-slider-row">
+          <div class="ssr-head"><span>{{ p.name }}</span><b>{{ editorResult()[p.id] }} %</b></div>
+          <input type="range" min="0" max="100" step="5" v-model.number="state.splitEditor.pcts[p.id]">
+        </div>
+        <div class="split-preview">
+          {{ state.settings.persons.filter((p) => editorResult()[p.id] > 0).map((p) => p.name + ' ' + editorResult()[p.id] + ' %').join(' / ') }}
+          <div class="hint" style="margin-top:4px">Die Regler werden automatisch auf zusammen 100 % skaliert.</div>
+        </div>
         <div class="modal-actions">
           <button class="btn btn-ghost" @click="state.splitEditor = null">Abbrechen</button>
           <button class="btn btn-primary" @click="applySplitEditor">Übernehmen</button>

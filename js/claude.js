@@ -205,7 +205,7 @@ function chatSchema(settings) {
           properties: {
             type: {
               type: 'string',
-              enum: ['rename_person', 'add_category', 'rename_category', 'remove_category', 'set_rule', 'remove_rule', 'set_default_category'],
+              enum: ['rename_person', 'add_person', 'remove_person', 'add_category', 'rename_category', 'remove_category', 'set_rule', 'remove_rule', 'set_default_category'],
             },
             personId: { anyOf: [{ type: 'string', enum: personIds }, { type: 'null' }] },
             name: { anyOf: [{ type: 'string' }, { type: 'null' }], description: 'Neuer Name (Person/Kategorie).' },
@@ -249,7 +249,8 @@ Aktuelle Konfiguration:
 ${ruleLines || '(noch keine)'}
 
 Du kannst die Konfiguration über actions direkt ändern (die App wendet sie sofort an):
-- rename_person (personId + name), rename_category (categoryId + name)
+- rename_person (personId + name), add_person (name), remove_person (personId — mindestens zwei Personen bleiben; "teilen" heißt immer gleichmäßig auf ALLE)
+- rename_category (categoryId + name)
 - add_category (categoryId = neue kurze ID + name), remove_category (categoryId)
 - set_rule (productName + categoryId + split), remove_rule (productName)
 - set_default_category (categoryId)

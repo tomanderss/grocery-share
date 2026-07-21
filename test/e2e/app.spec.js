@@ -103,7 +103,7 @@ test.describe('Bon-Workflow (manuell)', () => {
       store: 'REWE',
       items: [item({ name: 'PFAND', priceCents: 25, priceInput: '0,25', kind: 'deposit' })],
     });
-    await expect(page.locator('.item-card .chip-accent')).toContainText('immer 50:50');
+    await expect(page.locator('.item-card .chip-accent')).toContainText('immer gleichmäßig');
   });
 });
 
@@ -127,6 +127,41 @@ test.describe('Lernen & Monatsübersicht', () => {
     await page.waitForSelector('.screen.month');
     await expect(page.locator('.screen.month .sum-table')).toContainText('Drogerie');
     await expect(page.locator('.screen.month')).toContainText('1 abgeschlossene');
+  });
+});
+
+test.describe('Mehrere Personen', () => {
+  test('dritte Person: Split-Buttons, Slider-Editor und Tabellenspalte', async ({ page }) => {
+    await gotoApp(page);
+    // Lisa in den Einstellungen anlegen
+    await page.locator('.home-head .iconbtn').click();
+    await page.locator('.acc-head', { hasText: 'Personen' }).click();
+    await page.locator('.acc-body input[placeholder="Neue Person …"]').fill('Lisa');
+    await page.locator('.acc-body .iconbtn.accent').click();
+    await page.locator('.topbar .iconbtn').click();
+    await expect(page.locator('.app-sub')).toContainText('Lisa');
+
+    // Bon: Split-Buttons zeigen alle drei Personen + teilen + %
+    await seedReceipt(page, {
+      store: 'REWE',
+      items: [item({ name: 'Pizza', priceCents: 900, priceInput: '9,00', split: { p1: 34, p2: 33 } })],
+    });
+    const btns = page.locator('.split-btns button');
+    await expect(btns).toHaveCount(5);
+    await expect(btns.nth(2)).toHaveText('Lisa');
+    await expect(btns.nth(3)).toHaveText('teilen');
+
+    // %-Editor hat einen Slider je Person und skaliert auf 100
+    await btns.nth(4).click();
+    await expect(page.locator('.split-slider-row')).toHaveCount(3);
+    await page.evaluate(() => { window.__gs.state.splitEditor.pcts = { p1: 50, p2: 30, p3_test: 0 }; });
+    await page.locator('.modal .btn-primary').click();
+
+    // Auswertung hat drei Personen-Spalten
+    await page.locator('.review-actions .btn-primary').click();
+    await page.waitForSelector('.screen.summary');
+    await expect(page.locator('.sum-table thead th')).toHaveCount(4);
+    await expect(page.locator('.sum-table thead')).toContainText('Lisa');
   });
 });
 
