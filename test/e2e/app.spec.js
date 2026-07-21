@@ -53,6 +53,15 @@ test.describe('Bon-Workflow (manuell)', () => {
     const foot = table.locator('tfoot td.num');
     await expect(foot.nth(0)).toHaveText('15,00 €');
     await expect(foot.nth(1)).toHaveText('7,00 €');
+
+    // Bearbeiten eines ausgewerteten Bons = kostenloses lokales Speichern
+    await page.locator('.sum-actions .btn', { hasText: 'Bearbeiten' }).click();
+    await page.waitForSelector('.screen.review');
+    await expect(page.locator('.review-actions .btn-primary')).toContainText('Änderungen speichern');
+    await expect(page.locator('.save-hint')).toContainText('kostenlos');
+    await expect(page.locator('.reanalyze')).toContainText('kostenpflichtig');
+    await page.locator('.review-actions .btn-primary').click();
+    await page.waitForSelector('.screen.summary');
   });
 
   test('Sonstiges listet die Artikelnamen, Rabatt und Regel-Begründung sichtbar', async ({ page }) => {

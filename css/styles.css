@@ -48,8 +48,17 @@ body { min-height: 100dvh; }
 @keyframes pulse { 50% { transform: scale(1.08); } }
 
 input, select { font-family: inherit; font-size: 1rem; color: var(--text);
-  background: var(--bg2); border: 1.5px solid var(--grid); border-radius: 10px; padding: 9px 11px; width: 100%; }
+  background: var(--bg2); border: 1.5px solid var(--grid); border-radius: 10px; padding: 9px 11px;
+  width: 100%; min-width: 0; box-sizing: border-box; }
 input:focus, select:focus { outline: none; border-color: var(--accent); }
+/* Datums-Inputs haben in WebKit/Chrome eine intrinsische Mindestbreite und eine
+   eigene Höhe — auf Feldgröße der übrigen Inputs zwingen, sonst ragt das Feld
+   aus dem Raster bzw. Bildschirm heraus. */
+input[type="date"] {
+  -webkit-appearance: none; appearance: none;
+  min-height: 42px; max-width: 100%;
+}
+input[type="date"]::-webkit-date-and-time-value { text-align: left; }
 label { display: flex; flex-direction: column; gap: 5px; font-size: .82rem; color: var(--text2); font-weight: 600; }
 
 .chip { display: inline-flex; align-items: center; gap: 4px; font-size: .74rem; font-weight: 700;
@@ -105,6 +114,7 @@ label { display: flex; flex-direction: column; gap: 5px; font-size: .82rem; colo
 /* ── Review ── */
 .review-meta { display: flex; flex-direction: column; gap: 12px; margin-bottom: 14px; }
 .meta-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: end; }
+.meta-row label { min-width: 0; } /* Grid-Kinder dürfen unter Inhaltsbreite schrumpfen */
 .meta-check { font-size: .8rem; color: var(--text3); display: flex; align-items: center; gap: 6px; padding-bottom: 8px; }
 .meta-check.ok { color: var(--good); }
 .meta-check.bad { color: var(--warn); }
@@ -130,6 +140,12 @@ label { display: flex; flex-direction: column; gap: 5px; font-size: .82rem; colo
 .review-actions { display: flex; gap: 10px; margin-top: 16px; }
 .review-actions .btn-primary { flex: 1; }
 .screen.review > .btn-ghost.wide { margin-top: 12px; }
+.save-hint { display: flex; gap: 7px; align-items: flex-start; font-size: .78rem; color: var(--text3);
+  line-height: 1.45; margin: 10px 2px 0; }
+.save-hint .icon { flex: none; margin-top: 1px; }
+.reanalyze { margin-top: 12px; color: var(--warn); border-color: var(--warn); }
+.reanalyze-warn { background: var(--warn-soft); color: var(--warn); border-radius: 10px; padding: 10px 12px; font-size: .88rem; line-height: 1.45; }
+.chat-cost-hint { text-align: center; font-size: .72rem; color: var(--text3); padding: 6px 10px 0; }
 
 /* ── Auswertung ── */
 .sum-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
