@@ -1,0 +1,1 @@
+Startseite zeigt das verbleibende API-Guthaben (in den Einstellungen setzbar) und schätzt anhand der letzten Analysen, für wie viele Bons es noch reicht

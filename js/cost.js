@@ -36,3 +36,37 @@ export function formatCost(usd) {
 export function totalApiCostUsd(receipts) {
   return receipts.reduce((a, r) => a + (r.apiCost?.usd || 0), 0);
 }
+
+// Immer in Dollar formatieren (fürs Guthaben; kann durch Schätzfehler auch
+// leicht negativ werden — dann mit Minus anzeigen statt zu lügen).
+export function formatUsd(usd) {
+  const v = Math.round((usd || 0) * 100) / 100;
+  return `${v.toLocaleString('de-DE', { minimumFractionDigits: 2 })} $`;
+}
+
+// ── Guthaben-Tracking ────────────────────────────────────────────────────────
+// Die Anthropic-API bietet KEINE Guthaben-Abfrage — der Nutzer trägt seinen
+// Stand aus der Console als Anker ein ({ anchorUsd, anchorAt, spentUsd }), die
+// App zieht ab dann jeden KI-Aufruf ab.
+export function remainingCreditUsd(credit) {
+  if (!credit || credit.anchorUsd == null) return null;
+  return credit.anchorUsd - (credit.spentUsd || 0);
+}
+
+// Durchschnittskosten der letzten n Bon-Analysen (nach createdAt, neueste zuerst).
+export function avgAnalysisCostUsd(receipts, n = 10) {
+  const costs = receipts
+    .filter((r) => (r.apiCost?.usd || 0) > 0)
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+    .slice(0, n)
+    .map((r) => r.apiCost.usd);
+  if (!costs.length) return 0;
+  return costs.reduce((a, c) => a + c, 0) / costs.length;
+}
+
+// Wie viele Bons das Restguthaben ungefähr noch abdeckt. null = keine Basis
+// für eine Schätzung (noch keine Analyse oder kein Anker gesetzt).
+export function estimateReceiptsLeft(remainingUsd, avgUsd) {
+  if (remainingUsd == null || !avgUsd || avgUsd <= 0) return null;
+  return Math.max(0, Math.floor(remainingUsd / avgUsd));
+}
