@@ -1,0 +1,3 @@
+Beliebig viele Personen: in den Einstellungen (oder per KI-Chat) Personen hinzufügen und entfernen — Tom & Tara bleiben der Standard
+Prozent-Editor mit einem Slider je Person: jede Person lässt sich an jeder Position frei prozentual beteiligen (Regler werden automatisch auf 100 % skaliert)
+„teilen" heißt bei mehr als zwei Personen: exakt gleichmäßig auf alle — auch Pfand und Leergut

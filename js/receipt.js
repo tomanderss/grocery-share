@@ -68,6 +68,25 @@ export function normalizeSplit(split, personIds) {
   return out;
 }
 
+// Freie Slider-Werte (beliebige Summen, z.B. 60/60/30) proportional auf exakt
+// 100 % skalieren — für den Prozent-Editor mit einem Slider je Person.
+// Rundung per größtem Rest, deterministisch (Personen-Reihenfolge als Tiebreak).
+export function proportionalSplit(raw, personIds) {
+  const vals = personIds.map((pid) => Math.max(0, Number(raw?.[pid]) || 0));
+  const sum = vals.reduce((a, b) => a + b, 0);
+  if (sum <= 0) return evenSplit(personIds);
+  const exact = vals.map((v) => (v / sum) * 100);
+  const out = {};
+  let assigned = 0;
+  personIds.forEach((pid, i) => { out[pid] = Math.floor(exact[i]); assigned += out[pid]; });
+  let rest = 100 - assigned;
+  const order = personIds
+    .map((pid, i) => ({ pid, frac: exact[i] - Math.floor(exact[i]) }))
+    .sort((a, b) => b.frac - a.frac || personIds.indexOf(a.pid) - personIds.indexOf(b.pid));
+  for (let i = 0; rest > 0; i++, rest--) out[order[i % order.length].pid] += 1;
+  return out;
+}
+
 // Cent-genaue Aufteilung eines Betrags nach Prozent-Split. Rundungs-Restcents
 // werden deterministisch in Personen-Reihenfolge verteilt (größter Rest zuerst,
 // bei Gleichstand frühere Person) — die Summe der Anteile ist IMMER der Betrag.
