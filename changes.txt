@@ -1,0 +1,1 @@
+„Verwerfen" steht jetzt bei JEDEM Bon unten neben Speichern: bei bearbeiteten Bons stellt es den alten Stand wieder her, bei neuen Entwürfen löscht es den Entwurf, und hängen gebliebene Entwürfe werden wieder abgeschlossen

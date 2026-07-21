@@ -97,7 +97,7 @@ test.describe('Bon-Workflow (manuell)', () => {
     await page.locator('.review-actions .btn-primary').click();
     await page.waitForSelector('.screen.summary');
 
-    // Bearbeiten öffnen: Verwerfen-Button ist da (bei neuen Entwürfen nicht)
+    // Bearbeiten öffnen: Verwerfen stellt hier den alten Stand wieder her
     await page.locator('.sum-actions .btn', { hasText: 'Bearbeiten' }).click();
     await page.waitForSelector('.screen.review');
     const discard = page.locator('.review-actions .btn', { hasText: 'Verwerfen' });
@@ -117,6 +117,23 @@ test.describe('Bon-Workflow (manuell)', () => {
       return { status: r.status, backup: 'editBackup' in r };
     });
     expect(status).toEqual({ status: 'final', backup: false });
+  });
+
+  test('Verwerfen bei neuem Entwurf löscht ihn (Löschen-Button gibt es dort nicht)', async ({ page }) => {
+    await gotoApp(page);
+    await seedReceipt(page, {
+      store: 'REWE',
+      items: [item({ name: 'Brot', priceCents: 300, priceInput: '3,00' })],
+    });
+    // Entwurf: Verwerfen sichtbar, separates Löschen nicht (wäre identisch)
+    await expect(page.locator('.review-actions .btn', { hasText: 'Verwerfen' })).toBeVisible();
+    await expect(page.locator('.review-actions .btn', { hasText: 'Löschen' })).toHaveCount(0);
+
+    await page.locator('.review-actions .btn', { hasText: 'Verwerfen' }).click();
+    await page.locator('.modal .btn-danger').click();
+    await page.waitForSelector('.screen.home');
+    const count = await page.evaluate(() => window.__gs.state.receipts.length);
+    expect(count).toBe(0);
   });
 
   test('Differenz-Warnung bei abweichendem Gesamtbetrag', async ({ page }) => {

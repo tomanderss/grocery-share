@@ -218,18 +218,43 @@ function reopenReceipt() {
   state.screen = 'review';
 }
 
+// „Verwerfen" ist immer da und macht je nach Lage das Richtige:
+// - Sicherungskopie vorhanden → Stand von vor der Bearbeitung wiederherstellen.
+// - früher mal abgeschlossen, aber keine Kopie (Bearbeitung vor dem Update
+//   begonnen) → Bon einfach wieder abschließen, damit er nicht als Entwurf hängt.
+// - ganz neuer Entwurf → verwerfen heißt löschen.
 function discardChanges() {
   const r = currentReceipt();
-  if (!r || !r.editBackup) return;
-  confirmAction('Änderungen verwerfen? Der Bon bleibt, wie er vor der Bearbeitung war.', () => {
-    Object.assign(r, JSON.parse(JSON.stringify(r.editBackup)));
-    delete r.editBackup;
-    r.status = 'final';
-    persistReceipts();
-    log('bon', 'edit discarded', { store: r.store });
-    state.screen = 'summary';
-    toast('Änderungen verworfen');
-  });
+  if (!r) return;
+  if (r.editBackup) {
+    confirmAction('Änderungen verwerfen? Der Bon bleibt, wie er vor der Bearbeitung war.', () => {
+      Object.assign(r, JSON.parse(JSON.stringify(r.editBackup)));
+      delete r.editBackup;
+      r.status = 'final';
+      persistReceipts();
+      log('bon', 'edit discarded', { store: r.store });
+      state.screen = 'summary';
+      toast('Änderungen verworfen');
+    });
+  } else if (r.wasFinal) {
+    confirmAction('Keine Sicherungskopie vorhanden — der Bon wird mit dem aktuellen Stand wieder abgeschlossen. OK?', () => {
+      r.status = 'final';
+      persistReceipts();
+      log('bon', 'edit closed without backup', { store: r.store });
+      state.screen = 'summary';
+      toast('Bon wieder abgeschlossen');
+    });
+  } else {
+    confirmAction('Entwurf verwerfen? Der Bon wird gelöscht.', () => {
+      state.receipts = state.receipts.filter((x) => x.id !== r.id);
+      state.currentId = null;
+      persistReceipts();
+      deleteAttachmentsFor(r.id);
+      log('bon', 'draft discarded', { store: r.store });
+      state.screen = 'home';
+      toast('Entwurf verworfen');
+    });
+  }
 }
 
 // Preis-Eingabe: die UI hält den Rohtext (priceInput), Cents werden daraus geparst.
@@ -1077,8 +1102,9 @@ const app = createApp({
       <button class="btn btn-ghost wide" @click="addItem"><span v-html="ic('plus', 18)"></span> Position hinzufügen</button>
 
       <div class="review-actions">
-        <button class="btn btn-danger-ghost" @click="deleteReceipt(receipt)">Löschen</button>
-        <button v-if="receipt.wasFinal && receipt.editBackup" class="btn btn-ghost" @click="discardChanges">Verwerfen</button>
+        <!-- Bei neuen Entwürfen wäre Löschen == Verwerfen, daher nur bei ausgewerteten Bons -->
+        <button v-if="receipt.wasFinal" class="btn btn-danger-ghost" @click="deleteReceipt(receipt)">Löschen</button>
+        <button class="btn btn-ghost" @click="discardChanges">Verwerfen</button>
         <button class="btn btn-primary btn-big" @click="finalizeReceipt"><span v-html="ic('check', 20)"></span> {{ receipt.wasFinal ? 'Änderungen speichern' : 'Abschließen & auswerten' }}</button>
       </div>
       <div class="save-hint"><span v-html="ic('info', 15)"></span> Speichern und Auswerten sind kostenlos — alles passiert lokal auf dem Gerät. Nur „Neu analysieren" ruft die KI auf.</div>
