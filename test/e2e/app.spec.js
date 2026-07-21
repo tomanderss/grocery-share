@@ -104,6 +104,31 @@ test.describe('Persistenz', () => {
   });
 });
 
+test.describe('Guthaben', () => {
+  test('Guthaben setzen zeigt Karte mit Bon-Schätzung auf der Startseite', async ({ page }) => {
+    await gotoApp(page);
+    // Zwei analysierte Bons als Schätz-Basis (Ø 0,03 $) seeden
+    await seedReceipt(page, { store: 'A', apiCost: { usd: 0.02, model: 'claude-opus-4-8', inputTokens: 1, outputTokens: 1 }, items: [item()] });
+    await page.evaluate(() => { window.__gs.state.screen = 'home'; });
+    await seedReceipt(page, { store: 'B', apiCost: { usd: 0.04, model: 'claude-opus-4-8', inputTokens: 1, outputTokens: 1 }, items: [item()] });
+    await page.evaluate(() => { window.__gs.state.screen = 'home'; });
+    // Guthaben über die Einstellungen setzen
+    await page.locator('.home-head .iconbtn').click();
+    await page.locator('.acc-head', { hasText: 'Claude-KI' }).click();
+    await page.locator('.credit-block input').fill('3');
+    await page.locator('.credit-block .btn', { hasText: 'Setzen' }).click();
+    await page.locator('.topbar .iconbtn').click();
+    // Karte: 3 $ Rest, Ø 0,03 $ → ca. 100 Bons
+    const card = page.locator('.credit-card');
+    await expect(card).toContainText('Guthaben ≈ 3,00 $');
+    await expect(card).toContainText('ca. 100 Bons');
+    // Überlebt Reload (persistiert)
+    await page.reload();
+    await page.waitForSelector('.screen.home');
+    await expect(page.locator('.credit-card')).toContainText('3,00 $');
+  });
+});
+
 test.describe('KI-Kosten', () => {
   test('gespeicherte API-Kosten erscheinen in Bon-Liste und Auswertung', async ({ page }) => {
     await gotoApp(page);

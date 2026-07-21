@@ -37,6 +37,7 @@ const ICONS = {
   users: '<circle cx="8.5" cy="9" r="3"/><circle cx="16" cy="10" r="2.4"/>' + P('M3.5 19c.5-3 2.5-4.6 5-4.6s4.5 1.6 5 4.6M13.7 15.2c2.5-.6 5.3.6 5.8 3.8'),
   calendar: P('M4 6h16v14H4zM4 10h16M8 3v4M16 3v4'),
   euro: P('M17 6.5A6.5 6.5 0 0 0 6.7 12 6.5 6.5 0 0 0 17 17.5M4.5 10.4h8M4.5 13.6h7'),
+  wallet: P('M4 7h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z') + P('M4 7V6a2 2 0 0 1 2-2h11v3M15 13.5h2.5'),
 };
 
 export function icon(name, { size = 22, cls = '' } = {}) {

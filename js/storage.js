@@ -16,6 +16,7 @@ const K = {
   receipts: 'gs_receipts',
   rules: 'gs_rules',
   chat: 'gs_chat',
+  credit: 'gs_credit',
 };
 
 function read(key, fallback) {
@@ -64,10 +65,17 @@ export function saveRules(rules) { write(K.rules, rules); }
 export function loadChat() { return read(K.chat, []); }
 export function saveChat(messages) { write(K.chat, messages.slice(-60)); }
 
+// ── Guthaben-Anker ────────────────────────────────────────────────────────────
+// { anchorUsd: number|null, anchorAt: ts, spentUsd: number } — anchorUsd ist der
+// vom Nutzer eingetragene Console-Guthabenstand, spentUsd der seitdem von der
+// App verursachte Verbrauch (Analysen + Chat). Rechnen in js/cost.js.
+export function loadCredit() { return read(K.credit, { anchorUsd: null, anchorAt: 0, spentUsd: 0 }); }
+export function saveCredit(credit) { write(K.credit, credit); }
+
 // ── Backup / Export / Import ─────────────────────────────────────────────────
 // Der API-Key bleibt bewusst IM Export (persönliches Backup fürs eigene Gerät);
 // wer das Backup teilt, sollte das wissen — die UI weist darauf hin.
-export function collectExportData(settings, receipts, rules) {
+export function collectExportData(settings, receipts, rules, credit = null) {
   return {
     app: 'grocery-share',
     schema: 1,
@@ -75,6 +83,7 @@ export function collectExportData(settings, receipts, rules) {
     settings,
     receipts,
     rules,
+    credit,
   };
 }
 
@@ -89,6 +98,9 @@ export function parseImportData(json) {
     settings: mergeSettings(data.settings),
     receipts: Array.isArray(data.receipts) ? data.receipts : [],
     rules: Array.isArray(data.rules) ? data.rules : [],
+    credit: data.credit && typeof data.credit === 'object'
+      ? { anchorUsd: data.credit.anchorUsd ?? null, anchorAt: data.credit.anchorAt || 0, spentUsd: data.credit.spentUsd || 0 }
+      : { anchorUsd: null, anchorAt: 0, spentUsd: 0 },
   };
 }
 
@@ -96,6 +108,7 @@ export function applyImport(data) {
   saveSettings(data.settings);
   saveReceipts(data.receipts);
   saveRules(data.rules);
+  saveCredit(data.credit);
   log('storage', 'import applied', { receipts: data.receipts.length, rules: data.rules.length });
 }
 

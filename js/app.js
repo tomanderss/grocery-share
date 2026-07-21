@@ -6,14 +6,18 @@ import { createApp, reactive, computed } from './vue.esm-browser.prod.js';
 import { CLAUDE_MODELS, CHAT_HISTORY_LIMIT } from './config.js';
 import {
   loadSettings, saveSettings, loadReceipts, saveReceipts, loadRules, saveRules,
-  loadChat, saveChat, collectExportData, parseImportData, applyImport, newId,
+  loadChat, saveChat, loadCredit, saveCredit, collectExportData, parseImportData,
+  applyImport, newId,
 } from './storage.js';
 import {
   formatCents, toCents, evenSplit, normalizeSplit, isEvenSplit,
   receiptSummary, monthSummary, itemsTotal, receiptMonth,
 } from './receipt.js';
 import { applyRules, learnFromReceipt, rulesForPrompt, matchRule, normalizeKey } from './rules.js';
-import { costUsd, formatCost, totalApiCostUsd } from './cost.js';
+import {
+  costUsd, formatCost, formatUsd, totalApiCostUsd,
+  remainingCreditUsd, avgAnalysisCostUsd, estimateReceiptsLeft,
+} from './cost.js';
 import { analyzeReceipt, assistantChat } from './claude.js';
 import { icon } from './icons.js';
 import { log, exportLogText, clearLog } from './debuglog.js';
@@ -29,6 +33,8 @@ const state = reactive({
   receipts: loadReceipts(),
   rules: loadRules(),
   chat: loadChat(),
+  credit: loadCredit(),
+  creditInput: '',
   build: BUILD,
   changelog: CHANGELOG,
   monthKey: new Date().toISOString().slice(0, 7),
@@ -65,6 +71,24 @@ function toast(text, kind = 'ok') {
 }
 
 function confirmAction(text, onYes) { state.confirmDialog = { text, onYes }; }
+
+// Jeden KI-Verbrauch vom Guthaben-Anker abziehen (Analysen UND Chat).
+function trackSpend(usd) {
+  if (!usd || usd <= 0) return;
+  state.credit.spentUsd = (state.credit.spentUsd || 0) + usd;
+  saveCredit(JSON.parse(JSON.stringify(state.credit)));
+}
+
+// Guthaben-Anker aus den Einstellungen setzen (Stand aus der Anthropic Console).
+function setCreditAnchor() {
+  const v = parseFloat(String(state.creditInput).replace(',', '.'));
+  if (!isFinite(v) || v < 0) { toast('Bitte einen Betrag in Dollar eingeben, z.B. 5 oder 4,50', 'warn'); return; }
+  state.credit = { anchorUsd: v, anchorAt: Date.now(), spentUsd: 0 };
+  saveCredit(JSON.parse(JSON.stringify(state.credit)));
+  state.creditInput = '';
+  log('app', 'credit anchor set', { anchorUsd: v });
+  toast(`Guthaben auf ${formatUsd(v)} gesetzt — die App zählt ab jetzt mit`);
+}
 
 function applyTheme() {
   document.documentElement.dataset.theme = state.settings.theme;
@@ -252,6 +276,7 @@ async function onFilePicked(ev) {
       ruleLines: rulesForPrompt(state.rules, state.settings.persons, state.settings.categories),
     });
     const r = buildDraftFromAnalysis(result, usage);
+    trackSpend(r.apiCost?.usd);
     state.currentId = r.id;
     state.screen = 'review';
     log('bon', 'analyzed', { items: r.items.length, store: r.store });
@@ -408,7 +433,8 @@ async function sendChat() {
   state.chatBusy = true;
   try {
     const history = state.chat.slice(-CHAT_HISTORY_LIMIT).map((m) => ({ role: m.role, text: m.text }));
-    const { data: res } = await assistantChat({ settings: state.settings, rules: state.rules, history });
+    const { data: res, usage } = await assistantChat({ settings: state.settings, rules: state.rules, history });
+    trackSpend(costUsd(usage.model, usage.inputTokens, usage.outputTokens));
     const applied = (res.actions || []).map(applyAssistantAction).filter(Boolean);
     state.chat.push({ role: 'assistant', text: res.reply, actions: applied, ts: Date.now() });
     saveChat(state.chat);
@@ -554,6 +580,7 @@ function exportBackup() {
     JSON.parse(JSON.stringify(state.settings)),
     JSON.parse(JSON.stringify(state.receipts)),
     JSON.parse(JSON.stringify(state.rules)),
+    JSON.parse(JSON.stringify(state.credit)),
   );
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
@@ -575,6 +602,7 @@ async function importBackup(ev) {
       state.settings = data.settings;
       state.receipts = data.receipts;
       state.rules = data.rules;
+      state.credit = data.credit;
       applyTheme();
       toast('Sicherung eingespielt');
     });
@@ -658,13 +686,18 @@ const app = createApp({
     });
     const reviewCount = computed(() => receipt.value?.items.filter((i) => i.needsReview).length || 0);
     const sortedRules = computed(() => [...state.rules].sort((a, b) => b.updatedAt - a.updatedAt));
+    const creditLeft = computed(() => remainingCreditUsd(state.credit));
+    const bonsLeft = computed(() =>
+      estimateReceiptsLeft(creditLeft.value, avgAnalysisCostUsd(state.receipts)));
 
     return {
       state,
       models: CLAUDE_MODELS,
       receipt, summary, month, monthReceipts, totalsDiff, reviewCount, sortedRules,
+      creditLeft, bonsLeft,
       ic: (name, size) => icon(name, { size }),
-      fmt, personName, categoryName, formatDate, monthLabel, formatCost, totalApiCostUsd,
+      fmt, personName, categoryName, formatDate, monthLabel, formatCost, formatUsd, totalApiCostUsd,
+      setCreditAnchor,
       personIds,
       go: (screen) => { state.screen = screen; if (screen === 'chat') queueMicrotask(scrollChat); },
       addManualReceipt, onFilePicked, openReceipt, deleteReceipt,
@@ -719,6 +752,14 @@ const app = createApp({
         <div class="upload-hint">JPG, PNG oder PDF — die KI liest alle Positionen aus und schlägt die Aufteilung vor.</div>
         <button class="btn btn-ghost" @click="addManualReceipt"><span v-html="ic('edit', 18)"></span> Bon manuell anlegen</button>
       </div>
+
+      <button v-if="creditLeft !== null" class="credit-card card" :class="{ low: creditLeft < 1 }"
+              @click="go('settings'); state.settingsOpen.ki = true">
+        <span v-html="ic('wallet', 22)"></span>
+        <span class="cc-main">Guthaben ≈ {{ formatUsd(creditLeft) }}</span>
+        <span class="cc-est mut" v-if="bonsLeft !== null">reicht für ca. {{ bonsLeft.toLocaleString('de-DE') }} Bons</span>
+        <span class="cc-est mut" v-else>Schätzung folgt nach der ersten Bon-Analyse</span>
+      </button>
 
       <div class="home-actions">
         <button class="tile" @click="go('month')">
@@ -932,6 +973,18 @@ const app = createApp({
               <option v-for="m in models" :key="m.id" :value="m.id">{{ m.name }}</option>
             </select>
           </label>
+          <div class="credit-block">
+            <div class="credit-head">Guthaben-Tracking</div>
+            <div v-if="creditLeft !== null" class="credit-status">
+              Aktuell geschätzt: <b>{{ formatUsd(creditLeft) }}</b>
+              <span class="mut"> (seit dem Setzen {{ formatUsd(state.credit.spentUsd) }} verbraucht)</span>
+            </div>
+            <div class="cat-row">
+              <input inputmode="decimal" v-model="state.creditInput" placeholder="Guthaben in $, z.B. 5 oder 4,50" @keyup.enter="setCreditAnchor">
+              <button class="btn btn-ghost" @click="setCreditAnchor">Setzen</button>
+            </div>
+            <div class="hint">Die Claude-API bietet keine Guthaben-Abfrage — trag hier deinen Stand aus console.anthropic.com ▸ Billing ein. Die App zieht ab dann jede Analyse und jeden Chat-Aufruf (Listenpreise) davon ab und zeigt das Restguthaben auf der Startseite. Nach einer Aufladung einfach neu setzen.</div>
+          </div>
         </div>
       </div>
 
