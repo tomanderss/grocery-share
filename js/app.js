@@ -277,24 +277,31 @@ function setKind(item, kind) {
 // Jeder KI-Aufruf kostet Guthaben — deshalb wird NIE direkt analysiert, sondern
 // erst ein Bestätigungsdialog mit Kostenschätzung gezeigt (Ø der letzten
 // Analysen). forReceiptId gesetzt = bewusste NEU-Analyse eines bestehenden Bons.
+const MAX_ANALYZE_FILES = 8;
+
 async function onFilePicked(ev, forReceiptId = null) {
-  const file = ev.target.files?.[0];
+  let files = [...(ev.target.files || [])];
   ev.target.value = '';
-  if (!file) return;
+  if (!files.length) return;
   if (!state.settings.apiKey) {
     toast('Bitte zuerst den Claude-API-Key in den Einstellungen hinterlegen', 'warn');
     state.screen = 'settings';
     state.settingsOpen.ki = true;
     return;
   }
+  if (files.length > MAX_ANALYZE_FILES) {
+    toast(`Maximal ${MAX_ANALYZE_FILES} Aufnahmen pro Bon — die ersten ${MAX_ANALYZE_FILES} werden verwendet`, 'warn');
+    files = files.slice(0, MAX_ANALYZE_FILES);
+  }
   try {
-    const prepared = await prepareFile(file);
+    const preparedList = await Promise.all(files.map(prepareFile));
     const avg = avgAnalysisCostUsd(state.receipts);
     state.analyzeConfirm = {
-      prepared,
+      preparedList,
       forReceiptId,
+      pages: preparedList.length,
       estText: avg > 0
-        ? `${formatCost(avg)} (Ø deiner letzten Analysen)`
+        ? `${formatCost(avg)} (Ø deiner letzten Analysen${preparedList.length > 1 ? '; mehrere Aufnahmen kosten entsprechend mehr' : ''})`
         : 'wenige Cent (je nach Modell und Bon-Länge)',
     };
   } catch (e) {
@@ -311,7 +318,7 @@ async function confirmAnalyze() {
   try {
     const { data: result, usage } = await analyzeReceipt({
       settings: state.settings,
-      file: job.prepared,
+      files: job.preparedList,
       ruleLines: rulesForPrompt(state.rules, state.settings.persons, state.settings.categories),
     });
     const apiCost = usage
@@ -841,10 +848,10 @@ const app = createApp({
         <label class="btn btn-primary btn-big upload-btn" :class="{ disabled: state.analyzing }">
           <span v-html="ic('camera')"></span>
           <span>{{ state.analyzing ? 'Analysiere Bon …' : 'Bon fotografieren / hochladen' }}</span>
-          <input type="file" accept="image/*,application/pdf" @change="onFilePicked" :disabled="state.analyzing" hidden>
+          <input type="file" accept="image/*,application/pdf" multiple @change="onFilePicked" :disabled="state.analyzing" hidden>
         </label>
         <div v-if="state.analyzing" class="analyze-progress"><div class="bar"></div></div>
-        <div class="upload-hint">JPG, PNG oder PDF — die KI liest alle Positionen aus und schlägt die Aufteilung vor.</div>
+        <div class="upload-hint">JPG, PNG oder PDF — die KI liest alle Positionen aus und schlägt die Aufteilung vor. Langer Bon? Mehrere Fotos auswählen: sie werden zu EINEM Bon zusammengeführt.</div>
         <button class="btn btn-ghost" @click="addManualReceipt"><span v-html="ic('edit', 18)"></span> Bon manuell anlegen</button>
       </div>
 
@@ -947,7 +954,7 @@ const app = createApp({
       <div class="save-hint"><span v-html="ic('info', 15)"></span> Speichern und Auswerten sind kostenlos — alles passiert lokal auf dem Gerät. Nur „Neu analysieren" ruft die KI auf.</div>
       <label class="btn btn-ghost wide reanalyze" :class="{ disabled: state.analyzing }">
         <span v-html="ic('refresh', 18)"></span> {{ state.analyzing ? 'Analysiere …' : 'Neu analysieren (KI, kostenpflichtig) …' }}
-        <input type="file" accept="image/*,application/pdf" hidden @change="onFilePicked($event, receipt.id)" :disabled="state.analyzing">
+        <input type="file" accept="image/*,application/pdf" multiple hidden @change="onFilePicked($event, receipt.id)" :disabled="state.analyzing">
       </label>
     </main>
 
@@ -1182,6 +1189,7 @@ const app = createApp({
     <div v-if="state.analyzeConfirm" class="modal-bg" @click.self="state.analyzeConfirm = null">
       <div class="modal">
         <h3>KI-Analyse starten?</h3>
+        <p v-if="state.analyzeConfirm.pages > 1">{{ state.analyzeConfirm.pages }} Aufnahmen werden zu <b>einem Bon</b> zusammengeführt (Überlappungen an den Übergängen erkennt die KI und zählt sie nur einmal).</p>
         <p>Diese Aktion ruft die Claude-API auf und <b>verbraucht Guthaben</b>: {{ state.analyzeConfirm.estText }}.</p>
         <p v-if="state.analyzeConfirm.forReceiptId" class="reanalyze-warn"><b>Achtung:</b> Die Neu-Analyse ersetzt alle Positionen und Zuordnungen dieses Bons. Einzelne Korrekturen kannst du auch kostenlos direkt in den Positionen machen.</p>
         <div class="modal-actions">
