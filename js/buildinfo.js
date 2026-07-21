@@ -1,8 +1,15 @@
 // Auto-generiert von build.js — nicht manuell bearbeiten!
-export const BUILD      = '0.3';
-export const BUILD_HASH = 'a46a0fa';
+export const BUILD      = '0.4';
+export const BUILD_HASH = '85dd7ac';
 
 export const CHANGELOG = [
+  {
+    "version": "0.4",
+    "date": "21.07.2026",
+    "changes": [
+      "Startseite zeigt das verbleibende API-Guthaben (in den Einstellungen setzbar) und schätzt anhand der letzten Analysen, für wie viele Bons es noch reicht"
+    ]
+  },
   {
     "version": "0.3",
     "date": "21.07.2026",
