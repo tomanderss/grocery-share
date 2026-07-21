@@ -1,0 +1,1 @@
+Jeder per KI analysierte Bon zeigt jetzt die API-Kosten der Analyse (in Bon-Liste, Auswertung und als Monatssumme)
