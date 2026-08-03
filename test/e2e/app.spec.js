@@ -264,6 +264,63 @@ test.describe('Original-Dateien', () => {
   });
 });
 
+test.describe('Teilen-Ziel', () => {
+  const TINY_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+  test('geteilter Bon landet im Kosten-Bestätigungsdialog statt direkt in der KI', async ({ page }) => {
+    await gotoApp(page);
+    // API-Key setzen (ohne Key würde der Flow in die Einstellungen leiten)
+    await page.evaluate(() => { window.__gs.state.settings.apiKey = 'sk-test'; });
+
+    // Posteingang füllen wie es der Service Worker beim Teilen tut …
+    await page.evaluate(async (png) => {
+      const bytes = Uint8Array.from(atob(png), (c) => c.charCodeAt(0));
+      const cache = await caches.open('grocery-share-inbox');
+      await cache.put(new Request('./__shared/0'), new Response(new Blob([bytes], { type: 'image/png' }), {
+        headers: { 'content-type': 'image/png', 'x-shared-name': encodeURIComponent('bon.png') },
+      }));
+    }, TINY_PNG);
+
+    // … und die Abholung anstoßen (im echten Betrieb per ?share=N beim Start)
+    await page.evaluate(() => {
+      history.replaceState(null, '', location.pathname + '?share=1');
+      return window.__gs.pickUpSharedFiles();
+    });
+
+    // Bestätigungsdialog mit Kostenhinweis, KI wurde NICHT aufgerufen
+    await expect(page.locator('.modal', { hasText: 'verbraucht Guthaben' })).toBeVisible();
+    const state = await page.evaluate(async () => ({
+      pages: window.__gs.state.analyzeConfirm?.pages,
+      analyzing: window.__gs.state.analyzing,
+      inbox: (await (await caches.open('grocery-share-inbox')).keys()).length,
+      search: location.search,
+    }));
+    expect(state).toEqual({ pages: 1, analyzing: false, inbox: 0, search: '' });
+  });
+
+  test('Service Worker nimmt den POST des Teilen-Ziels an und leitet in die App', async ({ page }) => {
+    await gotoApp(page);
+    // auf einen aktiven SW warten (nur der fängt den POST ab)
+    await page.evaluate(() => navigator.serviceWorker.ready);
+    const result = await page.evaluate(async (png) => {
+      const bytes = Uint8Array.from(atob(png), (c) => c.charCodeAt(0));
+      const fd = new FormData();
+      fd.append('files', new File([bytes], 'kassenbon.pdf', { type: 'application/pdf' }));
+      const res = await fetch('./share-target', { method: 'POST', body: fd, redirect: 'manual' });
+      const cache = await caches.open('grocery-share-inbox');
+      const keys = await cache.keys();
+      const stored = keys.length ? await cache.match(keys[0]) : null;
+      return {
+        redirected: res.type === 'opaqueredirect' || res.redirected || res.status === 303,
+        stored: keys.length,
+        type: stored?.headers.get('content-type'),
+        name: decodeURIComponent(stored?.headers.get('x-shared-name') || ''),
+      };
+    }, TINY_PNG);
+    expect(result).toEqual({ redirected: true, stored: 1, type: 'application/pdf', name: 'kassenbon.pdf' });
+  });
+});
+
 test.describe('Persistenz', () => {
   test('Bons überleben einen Reload', async ({ page }) => {
     await gotoApp(page);

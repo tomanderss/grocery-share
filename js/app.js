@@ -420,6 +420,54 @@ async function onFilePicked(ev, forReceiptId = null) {
   }
 }
 
+// ── Teilen-Ziel ──────────────────────────────────────────────────────────────
+// Der Service Worker legt per Share-Target geteilte Bons im Cache „…-inbox" ab
+// und öffnet die App mit ?share=N. Hier werden sie abgeholt und in denselben
+// Bestätigungs-Flow gegeben wie ein normaler Upload (kein Auto-Analysieren —
+// jeder KI-Aufruf will bestätigt sein).
+async function pickUpSharedFiles() {
+  const params = new URLSearchParams(location.search);
+  if (!params.has('share')) return;
+  history.replaceState(null, '', location.pathname); // ?share aus der URL nehmen
+  if (!('caches' in window)) return;
+  try {
+    const cache = await caches.open('grocery-share-inbox');
+    const keys = await cache.keys();
+    if (!keys.length) return;
+    const files = [];
+    for (const key of keys) {
+      const res = await cache.match(key);
+      if (!res) continue;
+      const blob = await res.blob();
+      const name = decodeURIComponent(res.headers.get('x-shared-name') || 'bon');
+      files.push(new File([blob], name, { type: blob.type || 'application/octet-stream' }));
+    }
+    await Promise.all(keys.map((k) => cache.delete(k)));
+    if (!files.length) return;
+    log('bon', 'shared files received', { count: files.length });
+    // onFilePicked erwartet ein Event-artiges Objekt mit target.files
+    await onFilePicked({ target: { files, value: '' } });
+  } catch (e) {
+    log('error', 'share pickup failed', { message: String(e) });
+  }
+}
+
+// „Öffnen mit Grocery Share" (file_handlers, Desktop/Android): das System
+// übergibt die Datei-Handles hier statt per POST.
+function acceptLaunchFiles() {
+  if (!('launchQueue' in window)) return;
+  window.launchQueue.setConsumer(async (params) => {
+    if (!params?.files?.length) return;
+    try {
+      const files = await Promise.all(params.files.map((h) => h.getFile()));
+      log('bon', 'launch files received', { count: files.length });
+      await onFilePicked({ target: { files, value: '' } });
+    } catch (e) {
+      log('error', 'launch handoff failed', { message: String(e) });
+    }
+  });
+}
+
 async function confirmAnalyze() {
   const job = state.analyzeConfirm;
   state.analyzeConfirm = null;
@@ -1436,6 +1484,8 @@ applyTheme();
 app.mount('#app');
 registerSW();
 maybeShowWhatsNew();
+pickUpSharedFiles();
+acceptLaunchFiles();
 log('app', `start v${BUILD}`);
 
 // Splash ausblenden.
@@ -1450,6 +1500,7 @@ if (['localhost', '127.0.0.1'].includes(location.hostname)) {
   window.__gs = {
     state,
     newDraft,
+    pickUpSharedFiles,
     finalizeReceipt,
     reopenReceipt,
     buildDraftFromAnalysis,
