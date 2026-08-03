@@ -42,7 +42,9 @@ self.addEventListener('activate', (e) => {
     const shell = await cache.match(SHELL);
     if (shell) {
       const keys = await caches.keys();
-      await Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)));
+      // INBOX ausnehmen: dort können geteilte Dateien liegen, die die App noch
+      // nicht abgeholt hat (Update genau zwischen Teilen und Öffnen).
+      await Promise.all(keys.filter((k) => k !== CACHE && k !== INBOX).map((k) => caches.delete(k)));
     }
     await self.clients.claim();
   })());
@@ -52,8 +54,44 @@ self.addEventListener('message', (e) => {
   if (e.data === 'SKIP_WAITING') self.skipWaiting();
 });
 
+// Share-Target: geteilte Dateien landen als POST hier. Sie werden in einem
+// eigenen Cache („Posteingang") zwischengelagert und die App per Redirect mit
+// ?share=1 geöffnet — die holt sie dort ab (js/app.js, pickUpSharedFiles).
+// Der POST-Body überlebt keinen Redirect, deshalb dieser Umweg.
+const INBOX = 'grocery-share-inbox';
+
+async function stashSharedFiles(request) {
+  const form = await request.formData();
+  const files = form.getAll('files').filter((f) => f && typeof f === 'object' && f.size);
+  const cache = await caches.open(INBOX);
+  // alten Posteingang leeren, damit nie zwei Teilen-Vorgänge vermischt werden
+  await Promise.all((await cache.keys()).map((k) => cache.delete(k)));
+  await Promise.all(files.map((file, i) => cache.put(
+    new Request(`./__shared/${i}`),
+    new Response(file, {
+      headers: {
+        'content-type': file.type || 'application/octet-stream',
+        'x-shared-name': encodeURIComponent(file.name || `bon-${i + 1}`),
+      },
+    })
+  )));
+  return files.length;
+}
+
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
+
+  if (e.request.method === 'POST' && url.pathname.endsWith('/share-target')) {
+    e.respondWith((async () => {
+      let count = 0;
+      try {
+        count = await stashSharedFiles(e.request);
+      } catch { /* kaputte Freigabe → App trotzdem öffnen, ohne Dateien */ }
+      return Response.redirect(new URL(`./index.html?share=${count}`, self.registration.scope).href, 303);
+    })());
+    return;
+  }
+
   if (e.request.method !== 'GET' || url.origin !== location.origin) return; // API-Calls etc. durchreichen
 
   // Navigations-Anfragen offline aus der Shell bedienen.

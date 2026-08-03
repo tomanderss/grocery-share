@@ -40,7 +40,7 @@ node create-icons.js                       # regenerate PNG icons
 | `js/debuglog.js` | Persistent on-device diagnostic log (`gs_debuglog`, 300-entry FIFO). `log(category, message, extra)` — **log only low-frequency events** (start, errors, API calls with tookMs); export via Einstellungen ▸ Daten. |
 | `js/icons.js` | Custom-SVG-Icon-Set (24×24, `currentColor`), gerendert via `ic(name)`/v-html. Keine System-Emojis in der UI. Neue Glyphen immer hier ergänzen. |
 | `js/buildinfo.js` | **Auto-generated** by `build.js` — never edit manually. |
-| `sw.js` | Offline-Cache: Shell cache-first mit Navigations-Fallback, Assets stale-while-revalidate, Fremd-Origin (api.anthropic.com) wird durchgereicht. Precache einzeln (`Promise.allSettled`) + atomarer Swap. **JEDES neue `js/`-Modul MUSS in die `ASSETS`-Liste** — per Unit-Test erzwungen (`app-assets.test.js`). Cache-Version bumpt `build.js`. |
+| `sw.js` | Offline-Cache: Shell cache-first mit Navigations-Fallback, Assets stale-while-revalidate, Fremd-Origin (api.anthropic.com) wird durchgereicht. **Share-Target**: POST auf `./share-target` (aus `manifest.json`) wird abgefangen, die Dateien landen im Cache `grocery-share-inbox` (Key `./__shared/<i>`, Original-Dateiname als Header `x-shared-name`), danach 303-Redirect auf `./index.html?share=N`; `pickUpSharedFiles` in app.js holt sie beim Start ab und gibt sie in den normalen Bestätigungs-Flow (nie Auto-Analyse). Der INBOX-Cache ist vom Aufräumen in `activate` ausgenommen. Precache einzeln (`Promise.allSettled`) + atomarer Swap. **JEDES neue `js/`-Modul MUSS in die `ASSETS`-Liste** — per Unit-Test erzwungen (`app-assets.test.js`). Cache-Version bumpt `build.js`. |
 
 **Datenmodell Bon:** `{ id, store, date 'YYYY-MM-DD', createdAt, status 'draft'|'final', totalCents, notes, apiCost {usd, model, inputTokens, outputTokens}|null, items: [{ id, name, qty, priceCents, priceInput, categoryId, split {pid: %, Summe 100, über alle Personen}, kind 'normal'|'deposit'|'deposit_return', needsReview, fromRule }] }`. `totalCents` = Bon-Aufdruck; Differenz zu `itemsTotal` wird im Review als Warnung angezeigt.
 
@@ -48,7 +48,7 @@ node create-icons.js                       # regenerate PNG icons
 
 - Unit: `node:test`, no framework. Import `js/` modules directly (storage.test.js stubbt `localStorage` VOR dem Import). `app-assets.test.js` erzwingt SW-Precache-Vollständigkeit + Icon-Existenz + Konsistenz `.release-counter` ↔ `sw.js`.
 - E2E: Playwright, Pixel 7 emulation, `de-DE`, server on port 8098. Helpers in `test/e2e/helpers.js`. State driven via `window.__gs` (kein API-Key nötig — Bons werden per `newDraft` geseedet, die Claude-API wird in E2E nie aufgerufen).
-- CI: `.github/workflows/test.yml` — triggers on push to `main` and all PRs.
+- CI: `.github/workflows/test.yml` — triggers on push to `main` and all PRs. Playwright-Browser werden über `actions/cache` (Key = Hash von `package-lock.json`) wiederverwendet, der Install-Schritt läuft nur bei Cache-Miss — das war mit ~20 s von ~40 s der teuerste Schritt. `concurrency` bricht überholte PR-Läufe ab (auf `main` bewusst NICHT).
 
 ## Workflow for every code change
 
