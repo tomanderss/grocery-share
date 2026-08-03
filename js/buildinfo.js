@@ -1,8 +1,16 @@
 // Auto-generiert von build.js — nicht manuell bearbeiten!
-export const BUILD      = '0.14';
-export const BUILD_HASH = 'be309d8';
+export const BUILD      = '0.15';
+export const BUILD_HASH = '324ce2b';
 
 export const CHANGELOG = [
+  {
+    "version": "0.15",
+    "date": "03.08.2026",
+    "changes": [
+      "Bons lassen sich jetzt direkt aus anderen Apps teilen: Grocery Share taucht in der Teilen-Ansicht auf (Android/Chrome — iOS unterstützt das leider systemseitig noch nicht) und öffnet den geteilten Bon direkt im Kosten-Bestätigungsdialog",
+      "Auch „Öffnen mit Grocery Share\" für Bilder und PDFs wird unterstützt"
+    ]
+  },
   {
     "version": "0.14",
     "date": "21.07.2026",
