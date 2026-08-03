@@ -1,2 +1,0 @@
-Bons lassen sich jetzt direkt aus anderen Apps teilen: Grocery Share taucht in der Teilen-Ansicht auf (Android/Chrome — iOS unterstützt das leider systemseitig noch nicht) und öffnet den geteilten Bon direkt im Kosten-Bestätigungsdialog
-Auch „Öffnen mit Grocery Share" für Bilder und PDFs wird unterstützt
