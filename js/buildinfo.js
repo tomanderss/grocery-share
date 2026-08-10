@@ -1,8 +1,15 @@
 // Auto-generiert von build.js — nicht manuell bearbeiten!
-export const BUILD      = '0.15';
-export const BUILD_HASH = '324ce2b';
+export const BUILD      = '0.16';
+export const BUILD_HASH = 'e36ddcf';
 
 export const CHANGELOG = [
+  {
+    "version": "0.16",
+    "date": "10.08.2026",
+    "changes": [
+      "Guthaben lässt sich jetzt manuell korrigieren: echten Stand aus der Console eintragen, die App rechnet rückwärts, wie weit ihre Schätzung danebenlag, und korrigiert die KI-Kosten aller bisherigen Bons mit — die Summe führt danach exakt auf den eingetragenen Wert zurück"
+    ]
+  },
   {
     "version": "0.15",
     "date": "03.08.2026",
