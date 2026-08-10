@@ -32,7 +32,8 @@ export function formatCost(usd) {
   return `≈ ${(Math.round(usd * 100) / 100).toLocaleString('de-DE', { minimumFractionDigits: 2 })} $`;
 }
 
-// Summe der gespeicherten KI-Kosten einer Bon-Liste.
+// Summe der gespeicherten KI-Kosten einer Bon-Liste (roh, ohne Kalibrierung —
+// die legt die UI per calibratedUsd darüber).
 export function totalApiCostUsd(receipts) {
   return receipts.reduce((a, r) => a + (r.apiCost?.usd || 0), 0);
 }
@@ -46,11 +47,59 @@ export function formatUsd(usd) {
 
 // ── Guthaben-Tracking ────────────────────────────────────────────────────────
 // Die Anthropic-API bietet KEINE Guthaben-Abfrage — der Nutzer trägt seinen
-// Stand aus der Console als Anker ein ({ anchorUsd, anchorAt, spentUsd }), die
-// App zieht ab dann jeden KI-Aufruf ab.
+// Stand aus der Console als Anker ein
+// ({ anchorUsd, anchorAt, spentUsd, costFactor }), die App zieht ab dann jeden
+// KI-Aufruf ab. `spentUsd` sammelt IMMER die rohen Listenpreis-Beträge; die
+// Abweichung zur echten Abrechnung steckt in `costFactor` (siehe
+// reconcileCredit). So bleibt die Korrektur verlustfrei und wiederholbar.
+export function costFactor(credit) {
+  const f = Number(credit?.costFactor);
+  return isFinite(f) && f > 0 ? f : 1;
+}
+
+// Kalibrierter Betrag zu einem rohen Listenpreis-Wert (für Anzeige & Schätzung).
+export function calibratedUsd(rawUsd, credit) {
+  return (rawUsd || 0) * costFactor(credit);
+}
+
 export function remainingCreditUsd(credit) {
   if (!credit || credit.anchorUsd == null) return null;
-  return credit.anchorUsd - (credit.spentUsd || 0);
+  return credit.anchorUsd - (credit.spentUsd || 0) * costFactor(credit);
+}
+
+// Manuelle Korrektur: der Nutzer trägt das TATSÄCHLICHE Restguthaben ein
+// (Stand aus der Console). Daraus wird rückwärts gerechnet, wie stark die
+// Listenpreis-Schätzung danebenlag, und der Faktor auf ALLE bisherigen und
+// künftigen Beträge angewandt — die Summe der Bon-Kosten führt damit exakt auf
+// den eingetragenen Wert zurück.
+//
+// Zwei Fälle:
+//   'factor' — seit dem Anker wurde etwas verbraucht → Kalibrierfaktor neu
+//              bestimmen (die alten Bon-Beträge verschieben sich mit).
+//   'anchor' — nichts verbraucht, oder das Guthaben ist GESTIEGEN (Aufladung):
+//              dann ist nichts falsch gerechnet, der Anker wird neu gesetzt.
+export function reconcileCredit(credit, actualRemainingUsd, now = Date.now()) {
+  const actual = Number(actualRemainingUsd);
+  if (!isFinite(actual)) return null;
+  const rawSpent = credit?.spentUsd || 0;
+  const anchor = credit?.anchorUsd;
+  const actualSpent = anchor == null ? 0 : anchor - actual;
+
+  // Kein Anker, nichts verbraucht, oder aufgeladen → Anker neu setzen.
+  if (anchor == null || rawSpent <= 0 || actualSpent <= 0) {
+    return {
+      mode: 'anchor',
+      factor: costFactor(credit),
+      credit: { anchorUsd: actual, anchorAt: now, spentUsd: 0, costFactor: costFactor(credit) },
+    };
+  }
+
+  const factor = actualSpent / rawSpent;
+  return {
+    mode: 'factor',
+    factor,
+    credit: { ...credit, anchorUsd: anchor, spentUsd: rawSpent, costFactor: factor, correctedAt: now },
+  };
 }
 
 // Durchschnittskosten der letzten n Bon-Analysen (nach createdAt, neueste zuerst).

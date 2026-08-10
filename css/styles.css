@@ -218,6 +218,7 @@ label { display: flex; flex-direction: column; gap: 5px; font-size: .82rem; colo
 .credit-block { display: flex; flex-direction: column; gap: 10px; border-top: 1px solid var(--grid); padding-top: 13px; }
 .credit-head { font-weight: 800; font-size: .9rem; }
 .credit-status { font-size: .9rem; }
+.credit-fix { display: flex; flex-direction: column; gap: 10px; border-top: 1px dashed var(--grid); padding-top: 12px; }
 .switch-row { flex-direction: row; align-items: center; justify-content: space-between; font-size: .95rem; color: var(--text); }
 .switch-row input[type="checkbox"] { width: 22px; height: 22px; accent-color: var(--accent); }
 .btn-row { display: flex; gap: 10px; flex-wrap: wrap; }

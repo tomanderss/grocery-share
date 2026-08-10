@@ -20,6 +20,7 @@ import {
 import {
   costUsd, formatCost, formatUsd, totalApiCostUsd,
   remainingCreditUsd, avgAnalysisCostUsd, estimateReceiptsLeft,
+  reconcileCredit, calibratedUsd, costFactor,
 } from './cost.js';
 import { analyzeReceipt, assistantChat } from './claude.js';
 import {
@@ -42,6 +43,7 @@ const state = reactive({
   chat: loadChat(),
   credit: loadCredit(),
   creditInput: '',
+  creditCorrection: '', // manueller Ist-Stand für die Rückwärts-Korrektur
   build: BUILD,
   changelog: CHANGELOG,
   monthKey: new Date().toISOString().slice(0, 7),
@@ -95,14 +97,32 @@ function trackSpend(usd) {
 }
 
 // Guthaben-Anker aus den Einstellungen setzen (Stand aus der Anthropic Console).
+// Setzt die Kalibrierung zurück — ein frischer Anker ist per Definition korrekt.
 function setCreditAnchor() {
   const v = parseFloat(String(state.creditInput).replace(',', '.'));
   if (!isFinite(v) || v < 0) { toast('Bitte einen Betrag in Dollar eingeben, z.B. 5 oder 4,50', 'warn'); return; }
-  state.credit = { anchorUsd: v, anchorAt: Date.now(), spentUsd: 0 };
+  state.credit = { anchorUsd: v, anchorAt: Date.now(), spentUsd: 0, costFactor: 1 };
   saveCredit(JSON.parse(JSON.stringify(state.credit)));
   state.creditInput = '';
   log('app', 'credit anchor set', { anchorUsd: v });
   toast(`Guthaben auf ${formatUsd(v)} gesetzt — die App zählt ab jetzt mit`);
+}
+
+// Manuelle Korrektur: der echte Stand aus der Console wird eingetragen, die App
+// rechnet rückwärts, wie stark ihre Listenpreis-Schätzung danebenlag, und legt
+// den Faktor über ALLE Bon-Kosten — die Summe passt danach exakt zum Eingegebenen.
+function correctCredit() {
+  const v = parseFloat(String(state.creditCorrection).replace(',', '.'));
+  if (!isFinite(v) || v < 0) { toast('Bitte den echten Stand in Dollar eingeben, z.B. 3,80', 'warn'); return; }
+  const res = reconcileCredit(state.credit, v);
+  if (!res) return;
+  state.credit = res.credit;
+  saveCredit(JSON.parse(JSON.stringify(state.credit)));
+  state.creditCorrection = '';
+  log('app', 'credit corrected', { mode: res.mode, factor: Math.round(res.factor * 1000) / 1000 });
+  toast(res.mode === 'factor'
+    ? `Korrigiert — bisherige Bons sind um Faktor ${res.factor.toLocaleString('de-DE', { maximumFractionDigits: 2 })} nachgerechnet`
+    : `Guthaben auf ${formatUsd(v)} gesetzt (nichts nachzurechnen)`);
 }
 
 function applyTheme() {
@@ -406,7 +426,7 @@ async function onFilePicked(ev, forReceiptId = null) {
   }
   try {
     const preparedList = await Promise.all(files.map(prepareFile));
-    const avg = avgAnalysisCostUsd(state.receipts);
+    const avg = calibratedUsd(avgAnalysisCostUsd(state.receipts), state.credit);
     state.analyzeConfirm = {
       preparedList,
       forReceiptId,
@@ -983,17 +1003,21 @@ const app = createApp({
     const reviewCount = computed(() => receipt.value?.items.filter((i) => i.needsReview).length || 0);
     const sortedRules = computed(() => [...state.rules].sort((a, b) => b.updatedAt - a.updatedAt));
     const creditLeft = computed(() => remainingCreditUsd(state.credit));
-    const bonsLeft = computed(() =>
-      estimateReceiptsLeft(creditLeft.value, avgAnalysisCostUsd(state.receipts)));
+    // Ø-Kosten kalibriert, damit die Bon-Schätzung zum korrigierten Guthaben passt
+    const bonsLeft = computed(() => estimateReceiptsLeft(
+      creditLeft.value, calibratedUsd(avgAnalysisCostUsd(state.receipts), state.credit)));
+    // Alle angezeigten KI-Kosten laufen hierdurch: roher Listenpreis × Kalibrierung
+    const apiCost = (rawUsd) => formatCost(calibratedUsd(rawUsd, state.credit));
 
     return {
       state,
       models: CLAUDE_MODELS,
       receipt, summary, month, monthReceipts, totalsDiff, reviewCount, sortedRules,
-      creditLeft, bonsLeft,
+      creditLeft, bonsLeft, apiCost,
       ic: (name, size) => icon(name, { size }),
       fmt, personName, categoryName, formatDate, monthLabel, formatCost, formatUsd, totalApiCostUsd,
-      setCreditAnchor,
+      costFactor: () => costFactor(state.credit),
+      setCreditAnchor, correctCredit,
       personIds,
       go: (screen) => { state.screen = screen; if (screen === 'chat') queueMicrotask(scrollChat); },
       addManualReceipt, onFilePicked, confirmAnalyze, openReceipt, deleteReceipt,
@@ -1077,7 +1101,7 @@ const app = createApp({
         <button v-for="r in state.receipts.slice(0, 30)" :key="r.id" class="receipt-row card" @click="openReceipt(r)">
           <div class="rr-main">
             <div class="rr-store">{{ r.store || 'Ohne Namen' }} <span v-if="r.status === 'draft'" class="chip chip-warn">Entwurf</span></div>
-            <div class="rr-date">{{ formatDate(r.date) }} · {{ r.items.length }} Positionen<span v-if="r.apiCost" class="rr-api"> · KI {{ formatCost(r.apiCost.usd) }}</span></div>
+            <div class="rr-date">{{ formatDate(r.date) }} · {{ r.items.length }} Positionen<span v-if="r.apiCost" class="rr-api"> · KI {{ apiCost(r.apiCost.usd) }}</span></div>
           </div>
           <div class="rr-total">{{ fmt(r.totalCents || summaryFor(r).grandTotal) }}</div>
         </button>
@@ -1169,7 +1193,7 @@ const app = createApp({
           <div>
             <div class="sum-store">{{ receipt.store || 'Ohne Namen' }}</div>
             <div class="sum-date">{{ formatDate(receipt.date) }} · {{ receipt.items.length }} Positionen</div>
-            <div v-if="receipt.apiCost" class="sum-api">KI-Analyse: {{ formatCost(receipt.apiCost.usd) }} <span class="mut">({{ (receipt.apiCost.inputTokens + receipt.apiCost.outputTokens).toLocaleString('de-DE') }} Tokens)</span></div>
+            <div v-if="receipt.apiCost" class="sum-api">KI-Analyse: {{ apiCost(receipt.apiCost.usd) }} <span class="mut">({{ (receipt.apiCost.inputTokens + receipt.apiCost.outputTokens).toLocaleString('de-DE') }} Tokens)</span></div>
           </div>
           <div class="sum-total">{{ fmt(summary.grandTotal) }}</div>
         </div>
@@ -1214,7 +1238,7 @@ const app = createApp({
         <div class="sum-head">
           <div>
             <div class="sum-store">{{ month.receiptCount }} abgeschlossene Bons</div>
-            <div v-if="totalApiCostUsd(monthReceipts) > 0" class="sum-api">KI-Kosten im Monat: {{ formatCost(totalApiCostUsd(monthReceipts)) }}</div>
+            <div v-if="totalApiCostUsd(monthReceipts) > 0" class="sum-api">KI-Kosten im Monat: {{ apiCost(totalApiCostUsd(monthReceipts)) }}</div>
           </div>
           <div class="sum-total">{{ fmt(month.grandTotal) }}</div>
         </div>
@@ -1249,7 +1273,7 @@ const app = createApp({
         <button v-for="r in monthReceipts" :key="r.id" class="receipt-row card" @click="openReceipt(r)">
           <div class="rr-main">
             <div class="rr-store">{{ r.store || 'Ohne Namen' }} <span v-if="r.status === 'draft'" class="chip chip-warn">Entwurf</span></div>
-            <div class="rr-date">{{ formatDate(r.date) }}<span v-if="r.apiCost" class="rr-api"> · KI {{ formatCost(r.apiCost.usd) }}</span></div>
+            <div class="rr-date">{{ formatDate(r.date) }}<span v-if="r.apiCost" class="rr-api"> · KI {{ apiCost(r.apiCost.usd) }}</span></div>
           </div>
           <div class="rr-total">{{ fmt(r.totalCents || summaryFor(r).grandTotal) }}</div>
         </button>
@@ -1303,13 +1327,22 @@ const app = createApp({
             <div class="credit-head">Guthaben-Tracking</div>
             <div v-if="creditLeft !== null" class="credit-status">
               Aktuell geschätzt: <b>{{ formatUsd(creditLeft) }}</b>
-              <span class="mut"> (seit dem Setzen {{ formatUsd(state.credit.spentUsd) }} verbraucht)</span>
+              <span class="mut"> (seit dem Setzen {{ formatUsd(state.credit.spentUsd * costFactor()) }} verbraucht)</span>
+              <div v-if="costFactor() !== 1" class="mut">Nachgerechnet mit Faktor {{ costFactor().toLocaleString('de-DE', { maximumFractionDigits: 2 }) }} — alle Bon-Kosten sind entsprechend angepasst.</div>
             </div>
             <div class="cat-row">
               <input inputmode="decimal" v-model="state.creditInput" placeholder="Guthaben in $, z.B. 5 oder 4,50" @keyup.enter="setCreditAnchor">
               <button class="btn btn-ghost" @click="setCreditAnchor">Setzen</button>
             </div>
             <div class="hint">Die Claude-API bietet keine Guthaben-Abfrage — trag hier deinen Stand aus console.anthropic.com ▸ Billing ein. Die App zieht ab dann jede Analyse und jeden Chat-Aufruf (Listenpreise) davon ab und zeigt das Restguthaben auf der Startseite. Nach einer Aufladung einfach neu setzen.</div>
+            <div v-if="creditLeft !== null" class="credit-fix">
+              <div class="credit-head">Stimmt nicht? Korrigieren</div>
+              <div class="cat-row">
+                <input inputmode="decimal" v-model="state.creditCorrection" placeholder="Echter Stand in $, z.B. 3,80" @keyup.enter="correctCredit">
+                <button class="btn btn-ghost" @click="correctCredit">Korrigieren</button>
+              </div>
+              <div class="hint">Trag hier ein, was in der Console wirklich steht. Die App rechnet daraus rückwärts, wie weit ihre Schätzung danebenlag, und korrigiert die Kosten <b>aller bisherigen Bons</b> mit — die Summe führt danach exakt auf deinen Wert zurück. Im Gegensatz zum „Setzen“ oben bleibt die Verbrauchshistorie erhalten. Ist dein Guthaben gestiegen (Aufladung), wird stattdessen einfach neu verankert.</div>
+            </div>
           </div>
         </div>
       </div>
