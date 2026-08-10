@@ -1,0 +1,1 @@
+Guthaben lässt sich jetzt manuell korrigieren: echten Stand aus der Console eintragen, die App rechnet rückwärts, wie weit ihre Schätzung danebenlag, und korrigiert die KI-Kosten aller bisherigen Bons mit — die Summe führt danach exakt auf den eingetragenen Wert zurück

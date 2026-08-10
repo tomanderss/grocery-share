@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   costUsd, formatCost, formatUsd, totalApiCostUsd, MODEL_PRICES,
   remainingCreditUsd, avgAnalysisCostUsd, estimateReceiptsLeft,
+  reconcileCredit, calibratedUsd, costFactor,
 } from '../../js/cost.js';
 
 describe('costUsd', () => {
@@ -88,5 +89,62 @@ describe('Guthaben-Tracking', () => {
     assert.equal(estimateReceiptsLeft(-0.5, 0.03), 0);
     assert.equal(estimateReceiptsLeft(1, 0), null);   // keine Analyse-Basis
     assert.equal(estimateReceiptsLeft(null, 0.03), null); // kein Anker
+  });
+});
+
+describe('Guthaben manuell korrigieren', () => {
+  test('costFactor: Default 1, ungültige Werte fallen darauf zurück', () => {
+    assert.equal(costFactor(null), 1);
+    assert.equal(costFactor({}), 1);
+    assert.equal(costFactor({ costFactor: 0 }), 1);
+    assert.equal(costFactor({ costFactor: -2 }), 1);
+    assert.equal(costFactor({ costFactor: 1.5 }), 1.5);
+  });
+
+  test('remainingCreditUsd rechnet den Kalibrierfaktor mit ein', () => {
+    assert.equal(remainingCreditUsd({ anchorUsd: 5, spentUsd: 1, costFactor: 2 }), 3);
+    assert.equal(calibratedUsd(0.04, { costFactor: 1.5 }), 0.06);
+    assert.equal(calibratedUsd(0.04, null), 0.04);
+  });
+
+  test('Korrektur führt exakt auf den eingetragenen Stand zurück', () => {
+    // Anker 5 $, laut Listenpreisen 1 $ verbraucht — echt sind aber nur noch 3 $ da
+    const credit = { anchorUsd: 5, anchorAt: 1, spentUsd: 1, costFactor: 1 };
+    const res = reconcileCredit(credit, 3, 42);
+    assert.equal(res.mode, 'factor');
+    assert.equal(res.factor, 2);                       // doppelt so teuer wie geschätzt
+    assert.equal(remainingCreditUsd(res.credit), 3);   // exakt der eingetragene Wert
+    assert.equal(res.credit.spentUsd, 1);              // Rohwert bleibt erhalten
+    assert.equal(res.credit.correctedAt, 42);
+    // alte Bons werden mit demselben Faktor nachgerechnet
+    assert.equal(calibratedUsd(0.05, res.credit), 0.1);
+  });
+
+  test('mehrfaches Korrigieren kompoundiert nicht (Rohwerte bleiben Basis)', () => {
+    let credit = { anchorUsd: 5, anchorAt: 1, spentUsd: 1, costFactor: 1 };
+    credit = reconcileCredit(credit, 3, 2).credit;     // Faktor 2
+    credit = reconcileCredit(credit, 4.5, 3).credit;   // jetzt: echt 0,50 verbraucht
+    assert.equal(credit.costFactor, 0.5);              // aus dem ROHwert 1, nicht aus 2
+    assert.equal(remainingCreditUsd(credit), 4.5);
+  });
+
+  test('Aufladung oder nichts verbraucht → Anker neu setzen statt Faktor', () => {
+    // Guthaben gestiegen (aufgeladen)
+    const up = reconcileCredit({ anchorUsd: 5, spentUsd: 1, costFactor: 1 }, 20, 7);
+    assert.equal(up.mode, 'anchor');
+    assert.equal(up.credit.anchorUsd, 20);
+    assert.equal(up.credit.spentUsd, 0);
+    assert.equal(remainingCreditUsd(up.credit), 20);
+    // noch nichts verbraucht → nichts nachzurechnen
+    const fresh = reconcileCredit({ anchorUsd: 5, spentUsd: 0, costFactor: 1 }, 4, 7);
+    assert.equal(fresh.mode, 'anchor');
+    assert.equal(remainingCreditUsd(fresh.credit), 4);
+    // gar kein Anker gesetzt
+    assert.equal(reconcileCredit(null, 10, 7).mode, 'anchor');
+  });
+
+  test('unsinnige Eingabe wird abgelehnt', () => {
+    assert.equal(reconcileCredit({ anchorUsd: 5, spentUsd: 1 }, 'quatsch'), null);
+    assert.equal(reconcileCredit({ anchorUsd: 5, spentUsd: 1 }, NaN), null);
   });
 });

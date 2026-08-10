@@ -342,7 +342,7 @@ test.describe('Guthaben', () => {
     // Guthaben über die Einstellungen setzen
     await page.locator('.home-head .iconbtn').click();
     await page.locator('.acc-head', { hasText: 'Claude-KI' }).click();
-    await page.locator('.credit-block input').fill('3');
+    await page.locator('.credit-block input').first().fill('3');
     await page.locator('.credit-block .btn', { hasText: 'Setzen' }).click();
     await page.locator('.topbar .iconbtn').click();
     // Karte: 3 $ Rest, Ø 0,03 $ → ca. 100 Bons
@@ -353,6 +353,45 @@ test.describe('Guthaben', () => {
     await page.reload();
     await page.waitForSelector('.screen.home');
     await expect(page.locator('.credit-card')).toContainText('3,00 $');
+  });
+
+  test('manuelle Korrektur rechnet die Kosten aller alten Bons nach', async ({ page }) => {
+    await gotoApp(page);
+    // Bon mit 0,05 $ Analysekosten; Anker 5 $, davon laut Listenpreis 0,05 $ weg
+    await seedReceipt(page, {
+      store: 'REWE',
+      apiCost: { usd: 0.05, model: 'claude-opus-4-8', inputTokens: 1000, outputTokens: 100 },
+      items: [item()],
+    });
+    await page.evaluate(() => {
+      const s = window.__gs.state;
+      s.credit = { anchorUsd: 5, anchorAt: 1, spentUsd: 0.05, costFactor: 1 };
+      s.screen = 'home';
+    });
+    // Bon-Liste zeigt zunächst den Listenpreis
+    await expect(page.locator('.rr-api').first()).toContainText('5 ¢');
+
+    // Echter Stand laut Console: 4,90 $ → doppelt so teuer wie geschätzt
+    await page.locator('.home-head .iconbtn').click();
+    await page.locator('.acc-head', { hasText: 'Claude-KI' }).click();
+    await page.locator('.credit-fix input').fill('4,90');
+    await page.locator('.credit-fix .btn', { hasText: 'Korrigieren' }).click();
+
+    // Faktor 2 wird angezeigt, Guthaben trifft exakt den eingetragenen Wert
+    await expect(page.locator('.credit-status')).toContainText('Faktor 2');
+    await expect(page.locator('.credit-status')).toContainText('4,90 $');
+    await page.locator('.topbar .iconbtn').click();
+    await expect(page.locator('.credit-card')).toContainText('4,90 $');
+    // und der alte Bon ist rückwirkend nachgerechnet (5 ¢ → 10 ¢)
+    await expect(page.locator('.rr-api').first()).toContainText('10 ¢');
+
+    // Rohwert bleibt unangetastet — die Korrektur ist verlustfrei
+    const raw = await page.evaluate(() => ({
+      receiptRaw: window.__gs.state.receipts[0].apiCost.usd,
+      factor: window.__gs.state.credit.costFactor,
+    }));
+    expect(raw.receiptRaw).toBe(0.05);
+    expect(raw.factor).toBeCloseTo(2, 6); // exakter Quotient, keine gerundete Zahl
   });
 });
 
