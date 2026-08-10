@@ -97,11 +97,12 @@ function trackSpend(usd) {
 }
 
 // Guthaben-Anker aus den Einstellungen setzen (Stand aus der Anthropic Console).
-// Setzt die Kalibrierung zurück — ein frischer Anker ist per Definition korrekt.
+// Die gelernte Kalibrierung bleibt BESTEHEN: sie beschreibt, wie genau die
+// Listenpreis-Rechnung ist, und das ändert sich durch eine Aufladung nicht.
 function setCreditAnchor() {
   const v = parseFloat(String(state.creditInput).replace(',', '.'));
   if (!isFinite(v) || v < 0) { toast('Bitte einen Betrag in Dollar eingeben, z.B. 5 oder 4,50', 'warn'); return; }
-  state.credit = { anchorUsd: v, anchorAt: Date.now(), spentUsd: 0, costFactor: 1 };
+  state.credit = { anchorUsd: v, anchorAt: Date.now(), spentUsd: 0, costFactor: costFactor(state.credit) };
   saveCredit(JSON.parse(JSON.stringify(state.credit)));
   state.creditInput = '';
   log('app', 'credit anchor set', { anchorUsd: v });
@@ -123,6 +124,16 @@ function correctCredit() {
   toast(res.mode === 'factor'
     ? `Korrigiert — bisherige Bons sind um Faktor ${res.factor.toLocaleString('de-DE', { maximumFractionDigits: 2 })} nachgerechnet`
     : `Guthaben auf ${formatUsd(v)} gesetzt (nichts nachzurechnen)`);
+}
+
+// Kalibrierung verwerfen und wieder mit den reinen Listenpreisen rechnen.
+function resetCostFactor() {
+  confirmAction('Kalibrierung zurücksetzen? Die Bon-Kosten zeigen dann wieder die reinen Listenpreise.', () => {
+    state.credit = { ...state.credit, costFactor: 1 };
+    saveCredit(JSON.parse(JSON.stringify(state.credit)));
+    log('app', 'cost factor reset');
+    toast('Kalibrierung zurückgesetzt — es gelten wieder die Listenpreise');
+  });
 }
 
 function applyTheme() {
@@ -1017,7 +1028,7 @@ const app = createApp({
       ic: (name, size) => icon(name, { size }),
       fmt, personName, categoryName, formatDate, monthLabel, formatCost, formatUsd, totalApiCostUsd,
       costFactor: () => costFactor(state.credit),
-      setCreditAnchor, correctCredit,
+      setCreditAnchor, correctCredit, resetCostFactor,
       personIds,
       go: (screen) => { state.screen = screen; if (screen === 'chat') queueMicrotask(scrollChat); },
       addManualReceipt, onFilePicked, confirmAnalyze, openReceipt, deleteReceipt,
@@ -1328,7 +1339,10 @@ const app = createApp({
             <div v-if="creditLeft !== null" class="credit-status">
               Aktuell geschätzt: <b>{{ formatUsd(creditLeft) }}</b>
               <span class="mut"> (seit dem Setzen {{ formatUsd(state.credit.spentUsd * costFactor()) }} verbraucht)</span>
-              <div v-if="costFactor() !== 1" class="mut">Nachgerechnet mit Faktor {{ costFactor().toLocaleString('de-DE', { maximumFractionDigits: 2 }) }} — alle Bon-Kosten sind entsprechend angepasst.</div>
+              <div v-if="costFactor() !== 1" class="mut">
+                Nachgerechnet mit Faktor {{ costFactor().toLocaleString('de-DE', { maximumFractionDigits: 2 }) }} — alle Bon-Kosten sind entsprechend angepasst, auch künftige.
+                <button class="linkbtn" @click="resetCostFactor">zurücksetzen</button>
+              </div>
             </div>
             <div class="cat-row">
               <input inputmode="decimal" v-model="state.creditInput" placeholder="Guthaben in $, z.B. 5 oder 4,50" @keyup.enter="setCreditAnchor">

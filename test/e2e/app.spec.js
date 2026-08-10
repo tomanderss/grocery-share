@@ -393,6 +393,38 @@ test.describe('Guthaben', () => {
     expect(raw.receiptRaw).toBe(0.05);
     expect(raw.factor).toBeCloseTo(2, 6); // exakter Quotient, keine gerundete Zahl
   });
+
+  test('gelernte Kalibrierung gilt für neue Bons und überlebt einen neuen Anker', async ({ page }) => {
+    await gotoApp(page);
+    // Kalibrierung steht bereits (Faktor 2 gelernt)
+    await page.evaluate(() => {
+      window.__gs.state.credit = { anchorUsd: 5, anchorAt: 1, spentUsd: 0.05, costFactor: 2 };
+    });
+    // NEUER Bon nach der Korrektur → wird ebenfalls mit Faktor 2 angezeigt
+    await seedReceipt(page, {
+      store: 'EDEKA',
+      apiCost: { usd: 0.03, model: 'claude-opus-4-8', inputTokens: 1000, outputTokens: 100 },
+      items: [item()],
+    });
+    await page.evaluate(() => { window.__gs.state.screen = 'home'; });
+    await expect(page.locator('.rr-api').first()).toContainText('6 ¢'); // 3 ¢ roh × 2
+
+    // Aufladung per „Setzen" — die Kalibrierung darf NICHT verloren gehen
+    await page.locator('.home-head .iconbtn').click();
+    await page.locator('.acc-head', { hasText: 'Claude-KI' }).click();
+    await page.locator('.credit-block input').first().fill('20');
+    await page.locator('.credit-block .btn', { hasText: 'Setzen' }).click();
+    await expect(page.locator('.credit-status')).toContainText('Faktor 2');
+    expect(await page.evaluate(() => window.__gs.state.credit.costFactor)).toBe(2);
+
+    // ... lässt sich aber bewusst verwerfen
+    await page.locator('.credit-status .linkbtn').click();
+    await page.locator('.modal .btn-danger').click();
+    await expect(page.locator('.credit-status')).not.toContainText('Faktor');
+    expect(await page.evaluate(() => window.__gs.state.credit.costFactor)).toBe(1);
+    await page.locator('.topbar .iconbtn').click();
+    await expect(page.locator('.rr-api').first()).toContainText('3 ¢'); // wieder Listenpreis
+  });
 });
 
 test.describe('KI-Kosten', () => {
