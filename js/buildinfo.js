@@ -1,8 +1,15 @@
 // Auto-generiert von build.js — nicht manuell bearbeiten!
-export const BUILD      = '0.16';
-export const BUILD_HASH = 'e36ddcf';
+export const BUILD      = '0.17';
+export const BUILD_HASH = 'ed983b8';
 
 export const CHANGELOG = [
+  {
+    "version": "0.17",
+    "date": "10.08.2026",
+    "changes": [
+      "Die gelernte Guthaben-Kalibrierung bleibt jetzt auch nach einer Aufladung erhalten (vorher setzte „Setzen\" sie zurück) — sie gilt für neue Bons, die Kostenschätzung vor jeder Analyse und jeden weiteren Abzug; über „zurücksetzen\" lässt sie sich bewusst verwerfen"
+    ]
+  },
   {
     "version": "0.16",
     "date": "10.08.2026",
