@@ -17,7 +17,8 @@ test.describe('Grundgerüst', () => {
     await input.fill('Thomas');
     await input.blur();
     await page.locator('.topbar .iconbtn').click(); // zurück
-    await expect(page.locator('.app-sub')).toContainText('Thomas');
+    await seedReceipt(page, { store: 'REWE', items: [item()] });
+    await expect(page.locator('.split-btns button').first()).toHaveText('Thomas');
   });
 });
 
@@ -189,7 +190,6 @@ test.describe('Mehrere Personen', () => {
     await page.locator('.acc-body .iconbtn.accent').click();
     await page.locator('.cat-row .who-toggle').nth(2).click();
     await page.locator('.topbar .iconbtn').click();
-    await expect(page.locator('.app-sub')).toContainText('Lisa');
 
     // Bon: Split-Buttons zeigen alle drei Personen + teilen + %
     await seedReceipt(page, {
@@ -666,5 +666,56 @@ test.describe('Modellauswahl & Kostenprognose', () => {
     // Danach beide Fälle, klar benannt
     await expect(page.locator('.credit-case')).toHaveCount(2);
     await expect(page.locator('.credit-case').nth(1)).toContainText('Zahl stimmt nicht');
+  });
+});
+
+test.describe('Startseite & Verlauf', () => {
+  // Legt n Bons an und landet wieder auf der Startseite.
+  async function seedMany(page, n) {
+    await page.evaluate((count) => {
+      for (let i = 0; i < count; i++) {
+        window.__gs.newDraft({ store: `Markt ${i + 1}`, totalCents: (i + 1) * 100 });
+      }
+      window.__gs.state.currentId = null;
+      window.__gs.state.screen = 'home';
+    }, n);
+  }
+
+  test('kein Personen-Untertitel mehr im Kopf', async ({ page }) => {
+    await gotoApp(page);
+    await expect(page.locator('.app-title')).toHaveText('Grocery Share');
+    await expect(page.locator('.app-sub')).toHaveCount(0);
+  });
+
+  test('Startseite zeigt höchstens fünf Bons', async ({ page }) => {
+    await gotoApp(page);
+    await seedMany(page, 8);
+    await expect(page.locator('.screen.home .receipt-row')).toHaveCount(5);
+    // der neueste zuerst
+    await expect(page.locator('.screen.home .receipt-row').first()).toContainText('Markt 8');
+    await expect(page.locator('.screen.home .btn', { hasText: 'Ganzer Verlauf' })).toContainText('8 Bons');
+  });
+
+  test('bei wenigen Bons gibt es keinen Verlaufs-Button', async ({ page }) => {
+    await gotoApp(page);
+    await seedMany(page, 3);
+    await expect(page.locator('.screen.home .receipt-row')).toHaveCount(3);
+    await expect(page.locator('.screen.home .btn', { hasText: 'Ganzer Verlauf' })).toHaveCount(0);
+  });
+
+  test('der Verlauf zeigt alle Bons und führt in den Bon', async ({ page }) => {
+    await gotoApp(page);
+    await seedMany(page, 8);
+    await page.locator('.screen.home .btn', { hasText: 'Ganzer Verlauf' }).click();
+    await page.waitForSelector('.screen.history');
+    await expect(page.locator('.topbar-title')).toHaveText('Alle Bons');
+    await expect(page.locator('.screen.history .receipt-row')).toHaveCount(8);
+
+    // ein Bon aus dem Verlauf lässt sich öffnen
+    await page.locator('.screen.history .receipt-row', { hasText: 'Markt 1' }).click();
+    await page.waitForSelector('.screen.review');
+    // und der Zurück-Weg führt auf die Startseite
+    await page.locator('.topbar .iconbtn').click();
+    await page.waitForSelector('.screen.home');
   });
 });

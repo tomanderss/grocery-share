@@ -3,7 +3,7 @@
 // Bundler, ESM direkt im Browser, Template als String.
 
 import { createApp, reactive, computed } from './vue.esm-browser.prod.js';
-import { CLAUDE_MODELS, CHAT_HISTORY_LIMIT } from './config.js';
+import { CLAUDE_MODELS, CHAT_HISTORY_LIMIT, HOME_RECEIPTS } from './config.js';
 import {
   loadSettings, saveSettings, loadReceipts, saveReceipts, loadRules, saveRules,
   loadChat, saveChat, loadCredit, saveCredit, loadModelCatalog, saveModelCatalog,
@@ -1165,6 +1165,7 @@ const app = createApp({
       addPerson, removePerson, togglePersonFixed, toggleParticipant,
       toggleNetPrices, setVatRate, vatOptions, grossCents, vat,
       availableModels, refreshModels, modelForecast, modelForecastLabel,
+      HOME_RECEIPTS,
       activePids, guestPersons,
       summaryFor, copySummary, summaryToTSV, shiftMonth,
       sendChat, toggleVoice,
@@ -1193,6 +1194,7 @@ const app = createApp({
         <template v-if="state.screen === 'review'">Bon prüfen</template>
         <template v-else-if="state.screen === 'summary'">Auswertung</template>
         <template v-else-if="state.screen === 'month'">Monatsübersicht</template>
+        <template v-else-if="state.screen === 'history'">Alle Bons</template>
         <template v-else-if="state.screen === 'chat'">KI-Assistent</template>
         <template v-else-if="state.screen === 'settings'">Einstellungen</template>
       </div>
@@ -1202,10 +1204,7 @@ const app = createApp({
     <!-- ═══ HOME ═══ -->
     <main v-if="state.screen === 'home'" class="screen home">
       <div class="home-head">
-        <div>
-          <h1 class="app-title">Grocery Share</h1>
-          <div class="app-sub">{{ state.settings.persons.map((p) => p.name).join(state.settings.persons.length > 2 ? ', ' : ' & ') }}</div>
-        </div>
+        <h1 class="app-title">Grocery Share</h1>
         <button class="iconbtn" @click="go('settings')" v-html="ic('settings')" aria-label="Einstellungen"></button>
       </div>
 
@@ -1239,7 +1238,28 @@ const app = createApp({
 
       <h2 class="section-title" v-if="state.receipts.length">Letzte Bons</h2>
       <div class="receipt-list">
-        <button v-for="r in state.receipts.slice(0, 30)" :key="r.id" class="receipt-row card" @click="openReceipt(r)">
+        <button v-for="r in state.receipts.slice(0, HOME_RECEIPTS)" :key="r.id" class="receipt-row card" @click="openReceipt(r)">
+          <div class="rr-main">
+            <div class="rr-store">{{ r.store || 'Ohne Namen' }} <span v-if="r.status === 'draft'" class="chip chip-warn">Entwurf</span></div>
+            <div class="rr-date">{{ formatDate(r.date) }} · {{ r.items.length }} Positionen<span v-if="r.apiCost" class="rr-api"> · KI {{ apiCost(r.apiCost.usd) }}</span></div>
+          </div>
+          <div class="rr-total">{{ fmt(r.totalCents || summaryFor(r).grandTotal) }}</div>
+        </button>
+      </div>
+      <button v-if="state.receipts.length > HOME_RECEIPTS" class="btn btn-ghost wide" @click="go('history')">
+        <span v-html="ic('receipt', 18)"></span> Ganzer Verlauf ({{ state.receipts.length }} Bons)
+      </button>
+      <div v-if="!state.receipts.length" class="empty-hint">Noch keine Bons. Fotografier den ersten! 🧾</div>
+
+      <footer class="home-footer">
+        <button class="version" @click="checkForUpdate">v{{ state.build }}</button>
+      </footer>
+    </main>
+
+    <!-- ═══ VERLAUF (alle Bons) ═══ -->
+    <main v-else-if="state.screen === 'history'" class="screen history">
+      <div class="receipt-list">
+        <button v-for="r in state.receipts" :key="r.id" class="receipt-row card" @click="openReceipt(r)">
           <div class="rr-main">
             <div class="rr-store">{{ r.store || 'Ohne Namen' }} <span v-if="r.status === 'draft'" class="chip chip-warn">Entwurf</span></div>
             <div class="rr-date">{{ formatDate(r.date) }} · {{ r.items.length }} Positionen<span v-if="r.apiCost" class="rr-api"> · KI {{ apiCost(r.apiCost.usd) }}</span></div>
@@ -1248,10 +1268,6 @@ const app = createApp({
         </button>
       </div>
       <div v-if="!state.receipts.length" class="empty-hint">Noch keine Bons. Fotografier den ersten! 🧾</div>
-
-      <footer class="home-footer">
-        <button class="version" @click="checkForUpdate">v{{ state.build }}</button>
-      </footer>
     </main>
 
     <!-- ═══ REVIEW (Bon prüfen) ═══ -->

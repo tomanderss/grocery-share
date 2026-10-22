@@ -57,5 +57,9 @@ export const DEFAULT_SETTINGS = {
 // fliegen zuerst raus.
 export const MAX_RULES = 600;
 
+// Wie viele Bons die Startseite zeigt — der Rest steckt hinter „Ganzer Verlauf",
+// damit man auf der Hauptseite nicht ewig scrollt.
+export const HOME_RECEIPTS = 5;
+
 // Obergrenze der Chat-Historie, die an die API geschickt wird (Nachrichten).
 export const CHAT_HISTORY_LIMIT = 20;
