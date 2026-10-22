@@ -1,8 +1,17 @@
 // Auto-generiert von build.js — nicht manuell bearbeiten!
-export const BUILD      = '0.19';
-export const BUILD_HASH = '943bced';
+export const BUILD      = '0.20';
+export const BUILD_HASH = 'b0564b7';
 
 export const CHANGELOG = [
+  {
+    "version": "0.20",
+    "date": "22.10.2026",
+    "changes": [
+      "Modellauswahl kommt jetzt live von der Claude-API: neue Modelle (Opus 5.5 & Co.) erscheinen ohne App-Update, veraltete werden als solche markiert. Der Abruf ist kostenlos und läuft einmal täglich automatisch, per „Liste aktualisieren\" auch sofort",
+      "Neben jedem Modell steht die Kostenprognose pro Bon — gerechnet aus den Token-Verbräuchen deiner bisherigen Analysen, bevorzugt denen mit genau diesem Modell",
+      "Guthaben-Einstellungen sind kürzer und klar getrennt: „Aufgeladen\" für einen neuen Stand, „Zahl stimmt nicht\" für die rückwirkende Korrektur"
+    ]
+  },
   {
     "version": "0.19",
     "date": "22.10.2026",
