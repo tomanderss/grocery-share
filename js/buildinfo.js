@@ -1,8 +1,17 @@
 // Auto-generiert von build.js — nicht manuell bearbeiten!
-export const BUILD      = '0.17';
-export const BUILD_HASH = 'ed983b8';
+export const BUILD      = '0.18';
+export const BUILD_HASH = '9af69f9';
 
 export const CHANGELOG = [
+  {
+    "version": "0.18",
+    "date": "22.10.2026",
+    "changes": [
+      "Gäste: neue Personen werden als Gast angelegt und tauchen nur in den Bons auf, bei denen du sie über „Dabei:\" dazuschaltest — keine leeren Spalten mehr in jeder Abrechnung. In den Einstellungen lässt sich jede Person zwischen „Gast\" und „immer dabei\" umstellen",
+      "Monatsübersicht zeigt einen Gast nur in den Monaten, in denen er wirklich beteiligt war",
+      "„teilen\" ergibt jetzt auch bei drei und mehr Personen exakt gleiche Beträge (9,00 € sind 3× 3,00 € statt 3,06/2,97/2,97)"
+    ]
+  },
   {
     "version": "0.17",
     "date": "10.08.2026",
