@@ -82,23 +82,28 @@ function extractionSchema(settings) {
   return {
     type: 'object',
     additionalProperties: false,
-    required: ['store', 'date', 'total', 'items', 'notes'],
+    required: ['store', 'date', 'total', 'items', 'notes', 'netPrices'],
     properties: {
       store: { type: 'string', description: 'Name des Geschäfts, z.B. REWE, EDEKA, Rossmann, ALDI. Leer wenn unlesbar.' },
       date: { type: 'string', description: 'Kaufdatum als YYYY-MM-DD, leer wenn unlesbar.' },
       total: { type: 'number', description: 'Zu zahlender Gesamtbetrag des Bons in Euro (nach allen Rabatten und Pfand).' },
       notes: { type: 'string', description: 'Kurzer Hinweis auf Unklarheiten (unleserliche Zeilen etc.), sonst leer.' },
+      netPrices: {
+        type: 'boolean',
+        description: 'true, wenn die Artikelpreise auf dem Bon NETTO (ohne MwSt.) gedruckt sind und die Steuer erst am Bon-Ende aufgeschlagen wird — typisch für Großhandel wie METRO. false bei normalen Endkunden-Bons (REWE, EDEKA, ALDI, Rossmann …).',
+      },
       items: {
         type: 'array',
         items: {
           type: 'object',
           additionalProperties: false,
-          required: ['name', 'qty', 'totalPrice', 'discount', 'kind', 'categoryId', 'assignment'],
+          required: ['name', 'qty', 'totalPrice', 'discount', 'vatRate', 'kind', 'categoryId', 'assignment'],
           properties: {
             name: { type: 'string', description: 'Artikelname wie auf dem Bon (lesbar aufbereitet).' },
             qty: { type: 'number', description: 'Menge/Stückzahl, 1 wenn nicht angegeben.' },
             totalPrice: { type: 'number', description: 'Gesamtpreis dieser Position in Euro NACH Artikelrabatt. Negativ bei Leergut/Pfandrückgabe und Gutschriften.' },
             discount: { type: 'number', description: 'Artikelrabatt in Euro, der bereits in totalPrice eingerechnet ist (positive Zahl). 0 wenn kein Rabatt auf diese Position.' },
+            vatRate: { type: 'number', description: 'Umsatzsteuersatz dieser Position in Prozent (z.B. 7 oder 19). Nur bei netPrices=true füllen — sonst immer 0.' },
             kind: {
               type: 'string',
               enum: ['normal', 'deposit', 'deposit_return'],
@@ -132,6 +137,8 @@ MEHRTEILIGER BON — alle ${fileCount} Aufnahmen zeigen EINEN einzigen Bon (in R
   return `Du analysierst einen deutschen Kassenbon (typisch REWE, EDEKA, Rossmann, ALDI, dm, Lidl).
 ${multiPage}
 Extrahiere ALLE Positionen einzeln und vollständig:
+- NETTO-BONS (Großhandel, z.B. METRO): Prüfe zuerst, ob die Artikelpreise NETTO gedruckt sind — Indizien: ein Steuerblock am Bon-Ende ("Netto", "MwSt", "USt", "Steuer", Aufteilung nach Sätzen), ein Kürzel/Suffix hinter jeder Artikelzeile (z.B. "A", "B", "1", "2", "*") plus eine Legende, die diesem Kürzel einen Prozentsatz zuordnet. Dann netPrices=true setzen, in totalPrice den NETTO-Betrag übernehmen (genau wie gedruckt, NICHT selbst hochrechnen) und je Position über das Kürzel den passenden Satz in vatRate eintragen (z.B. 7 oder 19). Steht kein Kürzel an einer Zeile, leite den Satz aus der Warenart ab (Lebensmittel meist 7, Non-Food meist 19) und vermerke das knapp in notes.
+- Bei normalen Endkunden-Bons (Preise sind bereits Brutto): netPrices=false und vatRate immer 0 — auch wenn unten ein Steuerausweis steht.
 - RABATTE — bei JEDER Position konsequent prüfen, nie eine überspringen: Gehe den Bon Zeile für Zeile durch. Jede Abzugszeile ("Rabatt", "RABATT", "AKTION", "Coupon", "Preisvorteil", "Treue", ein negativer Betrag o.ä.) direkt unter oder neben einem Artikel gehört zu GENAU diesem Artikel: rechne sie in dessen totalPrice ein (Preis NACH Rabatt) UND trage den Rabattbetrag als positives discount-Feld dieser Position ein. Rabattzeilen sind NIE eine eigene Position.
 - Nur wenn ein Rabatt eindeutig für den GESAMTEN Einkauf gilt (z.B. "5% auf alles", Mitarbeiterrabatt, Coupon ohne Artikelbezug am Bon-Ende): lege dafür eine eigene Position an (Name z.B. "Gesamtrabatt 5%", negativer totalPrice, discount 0, kind normal, assignment shared).
 - Pfand beim Kauf ("PFAND", "+PFAND 0,25") ist eine EIGENE Position mit kind=deposit (positiver Betrag).

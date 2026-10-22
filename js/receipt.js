@@ -199,13 +199,49 @@ export function reassignSplits(items, oldIds, newIds) {
   }));
 }
 
+// ── Umsatzsteuer (Netto-Bons) ────────────────────────────────────────────────
+// Großhandels-Bons (METRO & Co.) drucken NETTO-Preise; die Steuer kommt erst
+// am Bon-Ende drauf, je Position über ein Kürzel hinter dem Artikel. Führt ein
+// Bon `netPrices`, ist `item.priceCents` der NETTO-Betrag und `item.vatRate`
+// der Satz in Prozent — gerechnet, angezeigt und geteilt wird immer BRUTTO.
+export const VAT_RATES = [0, 7, 19];
+
+export function grossCents(netCents, vatRate) {
+  const net = Math.round(netCents) || 0;
+  const rate = Number(vatRate) || 0;
+  if (!rate) return net;
+  return Math.round(net * (1 + rate / 100));
+}
+
+// Netto/Steuer/Brutto eines ganzen Bons, zusätzlich je Steuersatz aufgeschlüsselt
+// (zum Abgleich mit dem Steuerblock am Ende des Bons).
+export function vatTotals(receipt, settings) {
+  const personIds = receiptPersonIds(receipt, settings);
+  const out = { netCents: 0, vatCents: 0, grossCents: 0, byRate: {} };
+  if (!receipt?.netPrices) return out;
+  (receipt.items || []).forEach((raw) => {
+    // effectiveItem OHNE Steuer aufrufen, damit nur die Vorzeichen-/Pfandregeln greifen
+    const net = effectiveItem(raw, settings, personIds).priceCents;
+    const rate = Number(raw.vatRate) || 0;
+    const gross = grossCents(net, rate);
+    out.netCents += net;
+    out.grossCents += gross;
+    out.vatCents += gross - net;
+    const b = out.byRate[rate] || (out.byRate[rate] = { netCents: 0, vatCents: 0 });
+    b.netCents += net;
+    b.vatCents += gross - net;
+  });
+  return out;
+}
+
 // ── Effektive Position ────────────────────────────────────────────────────────
 // Wendet die Pfand-Zwangsregeln an: Pfand & Leergut → gleichmäßiger Split über
 // alle Personen + Pfand-Kategorie. Rückgabe-Beträge werden negativ gezwungen.
-export function effectiveItem(item, settings, personIds = defaultParticipantIds(settings)) {
+export function effectiveItem(item, settings, personIds = defaultParticipantIds(settings), netPrices = false) {
   const isDeposit = item.kind === 'deposit' || item.kind === 'deposit_return';
   let priceCents = Math.round(item.priceCents) || 0;
   if (item.kind === 'deposit_return' && priceCents > 0) priceCents = -priceCents;
+  if (netPrices) priceCents = grossCents(priceCents, item.vatRate);
   return {
     ...item,
     priceCents,
@@ -247,7 +283,7 @@ export function receiptSummary(receipt, settings) {
   const personTotals = Object.fromEntries(personIds.map((pid) => [pid, 0]));
 
   (receipt.items || []).forEach((raw) => {
-    const item = effectiveItem(raw, settings, personIds);
+    const item = effectiveItem(raw, settings, personIds, !!receipt.netPrices);
     const row = byCat.get(byCat.has(item.categoryId) ? item.categoryId : fallbackId);
     if (!row) return;
     grandTotal += item.priceCents;
@@ -280,7 +316,7 @@ export function receiptSummary(receipt, settings) {
 export function itemsTotal(receipt, settings) {
   const personIds = receiptPersonIds(receipt, settings);
   return (receipt.items || []).reduce(
-    (a, raw) => a + effectiveItem(raw, settings, personIds).priceCents, 0
+    (a, raw) => a + effectiveItem(raw, settings, personIds, !!receipt.netPrices).priceCents, 0
   );
 }
 
