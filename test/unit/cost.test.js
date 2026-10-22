@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   costUsd, formatCost, formatUsd, totalApiCostUsd, MODEL_PRICES,
   remainingCreditUsd, avgAnalysisCostUsd, estimateReceiptsLeft,
-  reconcileCredit, calibratedUsd, costFactor,
+  reconcileCredit, calibratedUsd, costFactor, priceFor, avgUsageFor, predictReceiptCostUsd,
 } from '../../js/cost.js';
 
 describe('costUsd', () => {
@@ -146,5 +146,63 @@ describe('Guthaben manuell korrigieren', () => {
   test('unsinnige Eingabe wird abgelehnt', () => {
     assert.equal(reconcileCredit({ anchorUsd: 5, spentUsd: 1 }, 'quatsch'), null);
     assert.equal(reconcileCredit({ anchorUsd: 5, spentUsd: 1 }, NaN), null);
+  });
+});
+
+describe('Kostenprognose je Modell', () => {
+  const r = (over) => ({ createdAt: 1, apiCost: { model: 'claude-opus-4-8', inputTokens: 1000, outputTokens: 100 }, ...over });
+
+  test('priceFor: Tabelle schlägt Linie schlägt Fallback', () => {
+    assert.deepEqual(priceFor('claude-opus-4-8'), { input: 5, output: 25, estimated: false });
+    // neues Modell, nur die Linie bekannt → geschätzt
+    assert.deepEqual(priceFor('claude-opus-5-5', 'opus'), { input: 5, output: 25, estimated: true });
+    assert.deepEqual(priceFor('claude-haiku-9', 'haiku'), { input: 1, output: 5, estimated: true });
+    // weder noch
+    assert.equal(priceFor('voellig-neu', null).estimated, true);
+  });
+
+  test('avgUsageFor bevorzugt die Historie desselben Modells', () => {
+    const receipts = [
+      r({ createdAt: 3, apiCost: { model: 'claude-opus-4-8', inputTokens: 2000, outputTokens: 200 } }),
+      r({ createdAt: 2, apiCost: { model: 'claude-haiku-4-5', inputTokens: 100, outputTokens: 10 } }),
+      r({ createdAt: 1, apiCost: { model: 'claude-opus-4-8', inputTokens: 1000, outputTokens: 100 } }),
+    ];
+    const own = avgUsageFor(receipts, 'claude-opus-4-8');
+    assert.deepEqual(own, { inputTokens: 1500, outputTokens: 150, count: 2, basis: 'model' });
+    // unbekanntes Modell → Schnitt über alle Analysen
+    const any = avgUsageFor(receipts, 'claude-opus-5-5');
+    assert.equal(any.basis, 'overall');
+    assert.equal(any.count, 3);
+    assert.equal(avgUsageFor([], 'x'), null);
+    assert.equal(avgUsageFor([{ createdAt: 1 }], 'x'), null); // manuell erfasst
+  });
+
+  test('predictReceiptCostUsd rechnet mit gemessenen Tokens und Kalibrierung', () => {
+    const receipts = [r({ apiCost: { model: 'claude-opus-4-8', inputTokens: 1_000_000, outputTokens: 0 } })];
+    // 1 Mio Input bei Opus = 5 $
+    const p = predictReceiptCostUsd({ id: 'claude-opus-4-8', line: 'opus' }, receipts);
+    assert.equal(p.usd, 5);
+    assert.equal(p.basis, 'model');
+    assert.equal(p.estimated, false);
+    // Kalibrierfaktor schlägt durch
+    assert.equal(predictReceiptCostUsd({ id: 'claude-opus-4-8' }, receipts, { costFactor: 2 }).usd, 10);
+    // günstigeres Modell → anteilig weniger, aber Preis nur geschätzt
+    const haiku = predictReceiptCostUsd({ id: 'claude-haiku-9', line: 'haiku' }, receipts);
+    assert.equal(haiku.usd, 1);
+    assert.equal(haiku.estimated, true);
+    assert.equal(haiku.basis, 'overall');
+    // ohne Historie keine Prognose
+    assert.equal(predictReceiptCostUsd({ id: 'x' }, []), null);
+  });
+});
+
+describe('Modell-ID-Zuordnung', () => {
+  test('datierte Schnappschüsse treffen, andere Versionen nicht', () => {
+    assert.equal(priceFor('claude-haiku-4-5-20251001').estimated, false); // Snapshot
+    assert.equal(priceFor('claude-haiku-4-5-20251001').input, 1);
+    // "claude-opus-5-5" ist NICHT "claude-opus-5" — sonst bekäme eine neue
+    // Version still den Preis der alten untergeschoben
+    assert.equal(priceFor('claude-opus-5-5').estimated, true);
+    assert.equal(priceFor('claude-opus-5').estimated, false);
   });
 });

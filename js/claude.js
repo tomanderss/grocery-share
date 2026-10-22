@@ -14,6 +14,34 @@ import { log } from './debuglog.js';
 import { predictRule, ruleDistributionLabel } from './rules.js';
 
 const API_URL = 'https://api.anthropic.com/v1/messages';
+const MODELS_URL = 'https://api.anthropic.com/v1/models?limit=1000';
+
+// Verfügbare Modelle beim Anbieter abfragen — damit ein neu erschienenes Modell
+// ohne App-Update auswählbar ist. Kostet nichts (kein Token-Verbrauch).
+// Wirft nie: schlägt der Abruf fehl, bleibt die eingebaute Liste stehen.
+export async function listModels(apiKey) {
+  if (!apiKey) return null;
+  const t0 = Date.now();
+  try {
+    const res = await fetch(MODELS_URL, {
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+    });
+    if (!res.ok) {
+      log('api', `models http ${res.status}`, { tookMs: Date.now() - t0 });
+      return null;
+    }
+    const json = await res.json();
+    log('api', 'models fetched', { tookMs: Date.now() - t0, count: json?.data?.length || 0 });
+    return json?.data || [];
+  } catch (e) {
+    log('api', 'models fetch failed', { message: e?.message });
+    return null;
+  }
+}
 
 async function callClaude({ apiKey, body }) {
   const t0 = Date.now();

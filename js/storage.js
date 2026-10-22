@@ -17,6 +17,7 @@ const K = {
   rules: 'gs_rules',
   chat: 'gs_chat',
   credit: 'gs_credit',
+  models: 'gs_models',
 };
 
 function read(key, fallback) {
@@ -71,6 +72,13 @@ export function saveChat(messages) { write(K.chat, messages.slice(-60)); }
 // App verursachte Verbrauch (Analysen + Chat). Rechnen in js/cost.js.
 export function loadCredit() { return read(K.credit, { anchorUsd: null, anchorAt: 0, spentUsd: 0 }); }
 export function saveCredit(credit) { write(K.credit, credit); }
+
+// ── Modell-Katalog ───────────────────────────────────────────────────────────
+// { models: [{id, name, line, createdAt, deprecated}], fetchedAt: ts } — zuletzt
+// von GET /v1/models geholt. Nur ein Cache: fehlt er, greift die eingebaute
+// Liste aus config.js. Bewusst NICHT im Backup (jederzeit neu abrufbar).
+export function loadModelCatalog() { return read(K.models, null); }
+export function saveModelCatalog(catalog) { write(K.models, catalog); }
 
 // ── Backup / Export / Import ─────────────────────────────────────────────────
 // Der API-Key bleibt bewusst IM Export (persönliches Backup fürs eigene Gerät);

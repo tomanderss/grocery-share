@@ -345,7 +345,7 @@ test.describe('Guthaben', () => {
     await page.locator('.home-head .iconbtn').click();
     await page.locator('.acc-head', { hasText: 'Claude-KI' }).click();
     await page.locator('.credit-block input').first().fill('3');
-    await page.locator('.credit-block .btn', { hasText: 'Setzen' }).click();
+    await page.locator('.credit-case .btn', { hasText: 'Übernehmen' }).click();
     await page.locator('.topbar .iconbtn').click();
     // Karte: 3 $ Rest, Ø 0,03 $ → ca. 100 Bons
     const card = page.locator('.credit-card');
@@ -376,8 +376,8 @@ test.describe('Guthaben', () => {
     // Echter Stand laut Console: 4,90 $ → doppelt so teuer wie geschätzt
     await page.locator('.home-head .iconbtn').click();
     await page.locator('.acc-head', { hasText: 'Claude-KI' }).click();
-    await page.locator('.credit-fix input').fill('4,90');
-    await page.locator('.credit-fix .btn', { hasText: 'Korrigieren' }).click();
+    await page.locator('.credit-case').nth(1).locator('input').fill('4,90');
+    await page.locator('.credit-case .btn', { hasText: 'Korrigieren' }).click();
 
     // Faktor 2 wird angezeigt, Guthaben trifft exakt den eingetragenen Wert
     await expect(page.locator('.credit-status')).toContainText('Faktor 2');
@@ -415,7 +415,7 @@ test.describe('Guthaben', () => {
     await page.locator('.home-head .iconbtn').click();
     await page.locator('.acc-head', { hasText: 'Claude-KI' }).click();
     await page.locator('.credit-block input').first().fill('20');
-    await page.locator('.credit-block .btn', { hasText: 'Setzen' }).click();
+    await page.locator('.credit-case .btn', { hasText: 'Übernehmen' }).click();
     await expect(page.locator('.credit-status')).toContainText('Faktor 2');
     expect(await page.evaluate(() => window.__gs.state.credit.costFactor)).toBe(2);
 
@@ -594,5 +594,77 @@ test.describe('Netto-Bons (MwSt. aufschlagen)', () => {
     // 0 % → Warn-Chip, Betrag unverändert (kein stiller Aufschlag)
     await expect(page.locator('.item-badges .chip-warn')).toContainText('MwSt.');
     await expect(page.locator('.item-badges').first()).toContainText('brutto 10,00 €');
+  });
+});
+
+test.describe('Modellauswahl & Kostenprognose', () => {
+  test('Liste zeigt je Modell die Prognose aus der eigenen Historie', async ({ page }) => {
+    await gotoApp(page);
+    // Eine Analyse als Basis: 1 Mio Input-Tokens mit Opus → 5,00 $ pro Bon
+    await seedReceipt(page, {
+      store: 'REWE',
+      apiCost: { usd: 5, model: 'claude-opus-4-8', inputTokens: 1000000, outputTokens: 0 },
+      items: [item()],
+    });
+    await page.evaluate(() => { window.__gs.state.screen = 'home'; });
+    await page.locator('.home-head .iconbtn').click();
+    await page.locator('.acc-head', { hasText: 'Claude-KI' }).click();
+
+    const opus = page.locator('.model-opt', { hasText: 'Opus 4.8' });
+    await expect(opus.locator('.mo-cost')).toContainText('5,00 $');
+    await expect(opus.locator('.mo-sub')).toContainText('mit diesem Modell');
+    // Haiku ist billiger — Prognose zieht nach, Basis ist die Gesamt-Historie
+    const haiku = page.locator('.model-opt', { hasText: 'Haiku' });
+    await expect(haiku.locator('.mo-cost')).toContainText('1,00 $');
+    await expect(haiku.locator('.mo-sub')).toContainText('bisherigen Analysen');
+  });
+
+  test('ohne Historie steht keine erfundene Zahl da', async ({ page }) => {
+    await gotoApp(page);
+    await page.locator('.home-head .iconbtn').click();
+    await page.locator('.acc-head', { hasText: 'Claude-KI' }).click();
+    await expect(page.locator('.model-opt').first().locator('.mo-cost')).toHaveText('–');
+    await expect(page.locator('.model-opt').first().locator('.mo-sub')).toContainText('noch keine Analyse');
+  });
+
+  test('ein von der API gemeldetes neues Modell ist sofort wählbar', async ({ page }) => {
+    await gotoApp(page);
+    // Katalog setzen, wie ihn refreshModels nach GET /v1/models ablegen würde
+    await page.evaluate(() => {
+      window.__gs.state.modelCatalog = {
+        fetchedAt: Date.now(),
+        models: [
+          { id: 'claude-opus-5-5', name: 'Claude Opus 5.5', line: 'opus', createdAt: '2026-09-21T00:00:00Z', deprecated: false },
+          { id: 'claude-opus-4-8', name: 'Claude Opus 4.8', line: 'opus', createdAt: '2026-01-01T00:00:00Z', deprecated: true },
+        ],
+      };
+    });
+    await page.locator('.home-head .iconbtn').click();
+    await page.locator('.acc-head', { hasText: 'Claude-KI' }).click();
+    const opts = page.locator('.model-opt');
+    await expect(opts).toHaveCount(2);
+    await expect(opts.first()).toContainText('Claude Opus 5.5');   // neueste zuerst
+    await expect(opts.nth(1)).toContainText('veraltet');
+
+    // auswählbar und persistiert
+    await opts.first().locator('input').check();
+    expect(await page.evaluate(() => window.__gs.state.settings.model)).toBe('claude-opus-5-5');
+    await page.reload();
+    await page.waitForSelector('.screen.home');
+    expect(await page.evaluate(() => window.__gs.state.settings.model)).toBe('claude-opus-5-5');
+  });
+
+  test('Guthaben-Einstellungen trennen Aufladen und Korrektur', async ({ page }) => {
+    await gotoApp(page);
+    await page.locator('.home-head .iconbtn').click();
+    await page.locator('.acc-head', { hasText: 'Claude-KI' }).click();
+    // Vor dem ersten Anker gibt es nur den Auflade-Fall
+    await expect(page.locator('.credit-case')).toHaveCount(1);
+    await expect(page.locator('.credit-case').first()).toContainText('Aufgeladen');
+    await page.locator('.credit-case input').first().fill('5');
+    await page.locator('.credit-case .btn', { hasText: 'Übernehmen' }).click();
+    // Danach beide Fälle, klar benannt
+    await expect(page.locator('.credit-case')).toHaveCount(2);
+    await expect(page.locator('.credit-case').nth(1)).toContainText('Zahl stimmt nicht');
   });
 });
