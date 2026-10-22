@@ -274,3 +274,18 @@ label { display: flex; flex-direction: column; gap: 5px; font-size: .82rem; colo
 .vat-pick { font: inherit; color: inherit; background: transparent; border: 0;
   padding: 0 2px 0 0; margin: 0; min-height: 0; border-radius: 0; cursor: pointer; }
 .vat-sum { font-size: .8rem; }
+
+/* Modellauswahl als Liste: Name + Basis der Prognose links, Kosten rechts —
+   im Dropdown wäre für die Prognose kein Platz. */
+.model-block { display: flex; flex-direction: column; gap: 8px; }
+.model-opt { display: flex; align-items: center; gap: 10px; padding: 9px 11px; cursor: pointer;
+  border: 1.5px solid var(--grid); border-radius: 10px; background: var(--bg2); }
+.model-opt.active { border-color: var(--accent); background: var(--accent-soft); }
+.model-opt input { flex: none; width: auto; min-height: 0; accent-color: var(--accent); }
+.mo-main { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.mo-name { font-weight: 700; font-size: .92rem; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.mo-old { font-size: .66rem; }
+.mo-sub { font-size: .76rem; color: var(--text2); }
+.mo-cost { font-weight: 800; font-size: .88rem; white-space: nowrap; }
+.credit-case { display: flex; flex-direction: column; gap: 8px; border-top: 1px dashed var(--grid); padding-top: 10px; }
+.credit-head .linkbtn { float: right; font-weight: 400; font-size: .82rem; }

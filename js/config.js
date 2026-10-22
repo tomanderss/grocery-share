@@ -31,10 +31,13 @@ export const DEPOSIT_CATEGORY_ID = 'einkaufen';
 // ─── KI ──────────────────────────────────────────────────────────────────────
 // Auswahl der Claude-Modelle für Bon-Analyse und Assistent-Chat. Opus 4.8 ist
 // der Standard (beste Erkennung von Thermobon-Fotos); Haiku als Spar-Option.
+// Eingebaute Rückfallebene — die App holt die aktuell verfügbaren Modelle beim
+// Start über GET /v1/models (js/models.js) und legt sie darüber. Diese Liste
+// greift nur ohne API-Key, offline oder wenn der Abruf scheitert.
 export const CLAUDE_MODELS = [
-  { id: 'claude-opus-4-8', name: 'Claude Opus 4.8 (empfohlen)' },
-  { id: 'claude-sonnet-5', name: 'Claude Sonnet 5 (günstiger)' },
-  { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5 (am günstigsten)' },
+  { id: 'claude-opus-4-8', name: 'Claude Opus 4.8', line: 'opus' },
+  { id: 'claude-sonnet-5', name: 'Claude Sonnet 5', line: 'sonnet' },
+  { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5', line: 'haiku' },
 ];
 export const DEFAULT_MODEL = 'claude-opus-4-8';
 

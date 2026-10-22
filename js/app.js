@@ -6,7 +6,8 @@ import { createApp, reactive, computed } from './vue.esm-browser.prod.js';
 import { CLAUDE_MODELS, CHAT_HISTORY_LIMIT } from './config.js';
 import {
   loadSettings, saveSettings, loadReceipts, saveReceipts, loadRules, saveRules,
-  loadChat, saveChat, loadCredit, saveCredit, collectExportData, parseImportData,
+  loadChat, saveChat, loadCredit, saveCredit, loadModelCatalog, saveModelCatalog,
+  collectExportData, parseImportData,
   applyImport, newId,
 } from './storage.js';
 import {
@@ -22,13 +23,14 @@ import {
 import {
   costUsd, formatCost, formatUsd, totalApiCostUsd,
   remainingCreditUsd, avgAnalysisCostUsd, estimateReceiptsLeft,
-  reconcileCredit, calibratedUsd, costFactor,
+  reconcileCredit, calibratedUsd, costFactor, predictReceiptCostUsd, priceFor,
 } from './cost.js';
-import { analyzeReceipt, assistantChat } from './claude.js';
+import { analyzeReceipt, assistantChat, listModels } from './claude.js';
 import {
   saveAttachments, getAttachments, deleteAttachmentsFor,
   getAllAttachments, replaceAllAttachments, clearAttachments,
 } from './attachments.js';
+import { mergeModels, catalogIsFresh } from './models.js';
 import { icon } from './icons.js';
 import { log, exportLogText, clearLog } from './debuglog.js';
 import { BUILD, CHANGELOG } from './buildinfo.js';
@@ -44,6 +46,8 @@ const state = reactive({
   rules: loadRules(),
   chat: loadChat(),
   credit: loadCredit(),
+  modelCatalog: loadModelCatalog(), // { models, fetchedAt } aus GET /v1/models
+  modelsLoading: false,
   creditInput: '',
   creditCorrection: '', // manueller Ist-Stand für die Rückwärts-Korrektur
   build: BUILD,
@@ -393,6 +397,48 @@ function applySplitEditor() {
     persistReceipts();
   }
   state.splitEditor = null;
+}
+
+// ── Modell-Katalog ──────────────────────────────────────────────────────────
+// Die verfügbaren Modelle kommen von der API, damit ein neues Modell ohne
+// App-Update auftaucht. Der Abruf kostet nichts und läuft still im Hintergrund;
+// scheitert er, bleibt der letzte Katalog bzw. die eingebaute Liste stehen.
+async function refreshModels({ force = false } = {}) {
+  if (state.modelsLoading) return;
+  if (!state.settings.apiKey) return;
+  if (!force && catalogIsFresh(state.modelCatalog)) return;
+  state.modelsLoading = true;
+  try {
+    const data = await listModels(state.settings.apiKey);
+    if (data) {
+      state.modelCatalog = { models: mergeModels(CLAUDE_MODELS, data), fetchedAt: Date.now() };
+      saveModelCatalog(JSON.parse(JSON.stringify(state.modelCatalog)));
+      if (force) toast(`${state.modelCatalog.models.length} Modelle geladen`);
+    } else if (force) {
+      toast('Modell-Liste konnte nicht geladen werden — es gilt die zuletzt bekannte', 'warn');
+    }
+  } finally {
+    state.modelsLoading = false;
+  }
+}
+
+// Auswahlliste: abgerufener Katalog, sonst die eingebaute Liste.
+function availableModels() {
+  const list = state.modelCatalog?.models;
+  return list && list.length ? list : CLAUDE_MODELS;
+}
+
+// Kostenprognose pro Bon für ein Modell — Basis sind die gemessenen
+// Token-Verbräuche der bisherigen Analysen.
+function modelForecast(m) {
+  return predictReceiptCostUsd(m, state.receipts, state.credit);
+}
+
+function modelForecastLabel(m) {
+  const f = modelForecast(m);
+  if (!f) return 'noch keine Analyse als Basis';
+  const basis = f.basis === 'model' ? `aus ${f.count} Analysen mit diesem Modell` : `aus ${f.count} bisherigen Analysen`;
+  return `${f.estimated ? 'Preis geschätzt · ' : ''}${basis}`;
 }
 
 // ── Umsatzsteuer (Netto-Bons) ───────────────────────────────────────────────
@@ -1003,6 +1049,7 @@ function wipeAll() {
     localStorage.removeItem('gs_rules');
     localStorage.removeItem('gs_chat');
     localStorage.removeItem('gs_credit');
+    localStorage.removeItem('gs_models');
     await clearAttachments();
     location.reload();
   });
@@ -1117,6 +1164,7 @@ const app = createApp({
       applySplitEditor, editorResult, onSplitSlider, toggleLock, setKind, finalizeReceipt, reopenReceipt, discardChanges,
       addPerson, removePerson, togglePersonFixed, toggleParticipant,
       toggleNetPrices, setVatRate, vatOptions, grossCents, vat,
+      availableModels, refreshModels, modelForecast, modelForecastLabel,
       activePids, guestPersons,
       summaryFor, copySummary, summaryToTSV, shiftMonth,
       sendChat, toggleVoice,
@@ -1436,11 +1484,22 @@ const app = createApp({
             <input type="password" v-model="state.settings.apiKey" @change="persistSettings" placeholder="sk-ant-…" autocomplete="off">
           </label>
           <div class="hint">Der Key wird nur lokal auf diesem Gerät gespeichert und direkt an api.anthropic.com geschickt. Erstellen unter console.anthropic.com → API Keys.</div>
-          <label>Modell
-            <select v-model="state.settings.model" @change="persistSettings">
-              <option v-for="m in models" :key="m.id" :value="m.id">{{ m.name }}</option>
-            </select>
-          </label>
+          <div class="model-block">
+            <div class="credit-head">Modell
+              <button class="linkbtn" @click="refreshModels({ force: true })" :disabled="state.modelsLoading">
+                {{ state.modelsLoading ? 'lädt …' : 'Liste aktualisieren' }}
+              </button>
+            </div>
+            <label v-for="m in availableModels()" :key="m.id" class="model-opt" :class="{ active: state.settings.model === m.id }">
+              <input type="radio" name="model" :value="m.id" v-model="state.settings.model" @change="persistSettings">
+              <span class="mo-main">
+                <span class="mo-name">{{ m.name }}<span v-if="m.deprecated" class="chip chip-warn mo-old">veraltet</span></span>
+                <span class="mo-sub">{{ modelForecastLabel(m) }}</span>
+              </span>
+              <span class="mo-cost">{{ modelForecast(m) ? formatCost(modelForecast(m).usd) : '–' }}</span>
+            </label>
+            <div class="hint">Die Liste kommt direkt von der Claude-API — neue Modelle erscheinen hier ohne App-Update (Abruf ist kostenlos, einmal täglich automatisch). Rechts steht, was ein Bon mit diesem Modell ungefähr kostet: gerechnet aus den Token-Verbräuchen deiner bisherigen Analysen. Preise liefert die API nicht mit; für brandneue Modelle wird über die Modell-Reihe geschätzt und das dazugesagt.</div>
+          </div>
           <div class="credit-block">
             <div class="credit-head">Guthaben-Tracking</div>
             <div v-if="creditLeft !== null" class="credit-status">
@@ -1451,19 +1510,23 @@ const app = createApp({
                 <button class="linkbtn" @click="resetCostFactor">zurücksetzen</button>
               </div>
             </div>
-            <div class="cat-row">
-              <input inputmode="decimal" v-model="state.creditInput" placeholder="Guthaben in $, z.B. 5 oder 4,50" @keyup.enter="setCreditAnchor">
-              <button class="btn btn-ghost" @click="setCreditAnchor">Setzen</button>
-            </div>
-            <div class="hint">Die Claude-API bietet keine Guthaben-Abfrage — trag hier deinen Stand aus console.anthropic.com ▸ Billing ein. Die App zieht ab dann jede Analyse und jeden Chat-Aufruf (Listenpreise) davon ab und zeigt das Restguthaben auf der Startseite. Nach einer Aufladung einfach neu setzen.</div>
-            <div v-if="creditLeft !== null" class="credit-fix">
-              <div class="credit-head">Stimmt nicht? Korrigieren</div>
+            <div class="credit-case">
+              <div class="credit-head"><span v-html="ic('plus', 16)"></span> Aufgeladen</div>
               <div class="cat-row">
-                <input inputmode="decimal" v-model="state.creditCorrection" placeholder="Echter Stand in $, z.B. 3,80" @keyup.enter="correctCredit">
+                <input inputmode="decimal" v-model="state.creditInput" placeholder="Neuer Stand in $" @keyup.enter="setCreditAnchor">
+                <button class="btn btn-ghost" @click="setCreditAnchor">Übernehmen</button>
+              </div>
+              <div class="hint">Zählt ab diesem Stand neu. Auch für den ersten Start.</div>
+            </div>
+            <div v-if="creditLeft !== null" class="credit-case">
+              <div class="credit-head"><span v-html="ic('refresh', 16)"></span> Zahl stimmt nicht</div>
+              <div class="cat-row">
+                <input inputmode="decimal" v-model="state.creditCorrection" placeholder="Echter Stand in $" @keyup.enter="correctCredit">
                 <button class="btn btn-ghost" @click="correctCredit">Korrigieren</button>
               </div>
-              <div class="hint">Trag hier ein, was in der Console wirklich steht. Die App rechnet daraus rückwärts, wie weit ihre Schätzung danebenlag, und korrigiert die Kosten <b>aller bisherigen Bons</b> mit — die Summe führt danach exakt auf deinen Wert zurück. Im Gegensatz zum „Setzen“ oben bleibt die Verbrauchshistorie erhalten. Ist dein Guthaben gestiegen (Aufladung), wird stattdessen einfach neu verankert.</div>
+              <div class="hint">Rechnet rückwärts nach: die Kosten aller bisherigen <b>und künftigen</b> Bons werden angepasst, die Verbrauchshistorie bleibt.</div>
             </div>
+            <div class="hint">Stand aus console.anthropic.com ▸ Billing — die API gibt das Guthaben nicht her.</div>
           </div>
         </div>
       </div>
@@ -1645,6 +1708,7 @@ registerSW();
 maybeShowWhatsNew();
 pickUpSharedFiles();
 acceptLaunchFiles();
+refreshModels(); // still im Hintergrund, höchstens einmal täglich
 log('app', `start v${BUILD}`);
 
 // Splash ausblenden.
@@ -1660,6 +1724,7 @@ if (['localhost', '127.0.0.1'].includes(location.hostname)) {
     state,
     newDraft,
     pickUpSharedFiles,
+    refreshModels,
     finalizeReceipt,
     reopenReceipt,
     buildDraftFromAnalysis,

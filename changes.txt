@@ -1,0 +1,3 @@
+Modellauswahl kommt jetzt live von der Claude-API: neue Modelle (Opus 5.5 & Co.) erscheinen ohne App-Update, veraltete werden als solche markiert. Der Abruf ist kostenlos und läuft einmal täglich automatisch, per „Liste aktualisieren" auch sofort
+Neben jedem Modell steht die Kostenprognose pro Bon — gerechnet aus den Token-Verbräuchen deiner bisherigen Analysen, bevorzugt denen mit genau diesem Modell
+Guthaben-Einstellungen sind kürzer und klar getrennt: „Aufgeladen" für einen neuen Stand, „Zahl stimmt nicht" für die rückwirkende Korrektur
