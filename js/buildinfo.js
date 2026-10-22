@@ -1,8 +1,15 @@
 // Auto-generiert von build.js — nicht manuell bearbeiten!
-export const BUILD      = '0.20';
-export const BUILD_HASH = 'b0564b7';
+export const BUILD      = '0.21';
+export const BUILD_HASH = '2ad85a0';
 
 export const CHANGELOG = [
+  {
+    "version": "0.21",
+    "date": "22.10.2026",
+    "changes": [
+      "Startseite aufgeräumt: die Namen unter dem Titel sind weg und „Letzte Bons\" zeigt nur noch die fünf neuesten — alles Weitere steckt hinter „Ganzer Verlauf\", damit man nicht mehr ewig scrollen muss"
+    ]
+  },
   {
     "version": "0.20",
     "date": "22.10.2026",
