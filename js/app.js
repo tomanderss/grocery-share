@@ -12,6 +12,7 @@ import {
 import {
   formatCents, toCents, evenSplit, normalizeSplit, isEvenSplit, proportionalSplit, rebalanceSplit,
   receiptSummary, monthSummary, itemsTotal, receiptMonth,
+  receiptPersonIds, defaultParticipantIds, reassignSplits,
 } from './receipt.js';
 import {
   applyRules, learnFromReceipt, rulesForPrompt, normalizeKey, normalizeRules,
@@ -145,7 +146,7 @@ function currentReceipt() {
   return state.receipts.find((r) => r.id === state.currentId) || null;
 }
 
-function newDraft({ store = '', date = '', totalCents = 0, items = [], notes = '', apiCost = null } = {}) {
+function newDraft({ store = '', date = '', totalCents = 0, items = [], notes = '', apiCost = null, participantIds = null } = {}) {
   const r = {
     id: newId('bon'),
     store,
@@ -155,6 +156,8 @@ function newDraft({ store = '', date = '', totalCents = 0, items = [], notes = '
     totalCents,
     notes,
     apiCost, // { usd, model, inputTokens, outputTokens } der KI-Analyse, sonst null
+    // Wer an DIESEM Bon beteiligt ist. Standard = feste Besetzung (ohne Gäste).
+    participantIds: participantIds || defaultParticipantIds(state.settings),
     items,
   };
   state.receipts.unshift(r);
@@ -169,6 +172,13 @@ function addManualReceipt() {
   addItem();
 }
 
+// Beteiligte des gerade offenen Bons (Gäste nur, wenn der Bon sie führt).
+// Alles, was an EINEM Bon rechnet, muss hierüber gehen — personIds() ist die
+// vollständige Personenliste und gehört nur in die Einstellungen.
+function activePids() {
+  return receiptPersonIds(currentReceipt(), state.settings);
+}
+
 function addItem() {
   const r = currentReceipt();
   if (!r) return;
@@ -179,7 +189,7 @@ function addItem() {
     priceCents: 0,
     priceInput: '',
     categoryId: state.settings.defaultCategoryId,
-    split: evenSplit(personIds()),
+    split: evenSplit(activePids()),
     kind: 'normal',
     needsReview: false,
   });
@@ -213,7 +223,7 @@ function finalizeReceipt() {
   if (!r) return;
   r.items = r.items.filter((i) => (i.name || '').trim() || i.priceCents);
   r.items.forEach((i) => {
-    i.split = normalizeSplit(i.split, personIds());
+    i.split = normalizeSplit(i.split, activePids());
     i.needsReview = false;
   });
   r.status = 'final';
@@ -222,7 +232,7 @@ function finalizeReceipt() {
     // die manuell angefassten (sonst zählt jedes Speichern die Statistik hoch).
     const learnItems = r.wasFinal ? r.items.filter((i) => i.touched) : r.items;
     if (learnItems.length) {
-      state.rules = learnFromReceipt(state.rules, { items: learnItems }, Date.now(), personIds());
+      state.rules = learnFromReceipt(state.rules, { items: learnItems }, Date.now(), activePids());
       persistRules();
     }
   }
@@ -300,7 +310,7 @@ function onTotalInput(r, ev) {
 
 // Split-Schnellwahl: 'shared' | pid | 'custom'
 function setQuickSplit(item, mode) {
-  const pids = personIds();
+  const pids = activePids();
   if (mode === 'shared') item.split = evenSplit(pids);
   else if (pids.includes(mode)) item.split = Object.fromEntries(pids.map((pid) => [pid, pid === mode ? 100 : 0]));
   else {
@@ -318,14 +328,14 @@ function setQuickSplit(item, mode) {
 }
 
 function splitMode(item) {
-  const pids = personIds();
+  const pids = activePids();
   if (isEvenSplit(item.split, pids)) return 'shared';
   const solo = pids.find((pid) => (item.split[pid] || 0) === 100);
   return solo || 'custom';
 }
 
 function splitLabel(item) {
-  const pids = personIds();
+  const pids = activePids();
   const mode = splitMode(item);
   if (mode === 'shared') return pids.length === 2 ? 'geteilt 50 : 50' : 'gleichmäßig geteilt';
   if (pids.includes(mode)) return `nur ${personName(mode)}`;
@@ -339,7 +349,7 @@ function splitLabel(item) {
 function onSplitSlider(pid, ev) {
   const ed = state.splitEditor;
   if (!ed) return;
-  ed.pcts = rebalanceSplit(ed.pcts, pid, ev.target.value, personIds(), ed.locked);
+  ed.pcts = rebalanceSplit(ed.pcts, pid, ev.target.value, activePids(), ed.locked);
   // geklemmte Eingabe (gesperrte Werte brauchen Platz) sofort im DOM spiegeln,
   // sonst bleibt der Browser-Slider optisch über dem Maximum stehen
   ev.target.value = ed.pcts[pid];
@@ -351,12 +361,12 @@ function toggleLock(pid) {
   const ed = state.splitEditor;
   if (!ed) return;
   if (!ed.locked[pid]) {
-    const unlocked = personIds().filter((id) => !ed.locked[id]);
+    const unlocked = activePids().filter((id) => !ed.locked[id]);
     if (unlocked.length <= 1) return;
     ed.locked[pid] = true;
     // sind jetzt alle bis auf einen gesperrt, bekommt der Offene exakt den Rest
-    const open = personIds().filter((id) => !ed.locked[id]);
-    if (open.length === 1) ed.pcts = rebalanceSplit(ed.pcts, open[0], ed.pcts[open[0]], personIds(), ed.locked);
+    const open = activePids().filter((id) => !ed.locked[id]);
+    if (open.length === 1) ed.pcts = rebalanceSplit(ed.pcts, open[0], ed.pcts[open[0]], activePids(), ed.locked);
   } else {
     delete ed.locked[pid];
   }
@@ -365,7 +375,7 @@ function toggleLock(pid) {
 // Sicherheitsnetz beim Übernehmen: skaliert auf exakt 100 % (nach
 // rebalanceSplit normalerweise schon der Fall).
 function editorResult() {
-  return proportionalSplit(state.splitEditor?.pcts || {}, personIds());
+  return proportionalSplit(state.splitEditor?.pcts || {}, activePids());
 }
 
 function applySplitEditor() {
@@ -383,13 +393,49 @@ function applySplitEditor() {
 }
 
 // ── Personen-Verwaltung ──────────────────────────────────────────────────────
+// Neue Personen starten als GAST: sie erscheinen nur in Bons, bei denen sie
+// ausdrücklich dazugeschaltet werden — sonst stünde eine dritte Person ab sofort
+// in jeder Abrechnung, meist mit 0,00 €.
 function addPerson() {
   const name = state.newPersonName.trim();
   if (!name) return;
-  state.settings.persons.push({ id: newId('p'), name });
+  state.settings.persons.push({ id: newId('p'), name, optional: true });
   state.newPersonName = '';
   persistSettings();
-  toast(`${name} ist dabei — „teilen" heißt jetzt: gleichmäßig auf alle ${state.settings.persons.length}`);
+  toast(`${name} angelegt — als Gast. Pro Bon mit „+ ${name}" dazuschalten.`);
+}
+
+// Alle als Gast geführten Personen (steuert, ob die „Dabei:"-Zeile erscheint).
+function guestPersons() {
+  return state.settings.persons.filter((p) => p.optional);
+}
+
+// Gast ⇄ feste Besetzung. Fest heißt: ab sofort bei jedem neuen Bon dabei.
+function togglePersonFixed(p) {
+  if (!p.optional && state.settings.persons.filter((x) => !x.optional).length <= 2) {
+    toast('Mindestens zwei Personen müssen fest dabei sein', 'warn');
+    return;
+  }
+  if (p.optional) delete p.optional; else p.optional = true;
+  persistSettings();
+  toast(p.optional ? `${p.name} ist jetzt Gast` : `${p.name} ist jetzt immer dabei`);
+}
+
+// Gast für den offenen Bon dazuschalten oder wieder abwählen. Gleichmäßig
+// geteilte Positionen werden dabei auf die neue Runde umgelegt.
+function toggleParticipant(pid) {
+  const r = currentReceipt();
+  if (!r) return;
+  const before = receiptPersonIds(r, state.settings);
+  const next = before.includes(pid) ? before.filter((x) => x !== pid) : [...before, pid];
+  if (next.length < 1) { toast('Mindestens eine Person muss beteiligt sein', 'warn'); return; }
+  const order = state.settings.persons.map((x) => x.id).filter((x) => next.includes(x));
+  r.participantIds = order;
+  r.items = reassignSplits(r.items, before, order);
+  r.items.forEach((i) => { i.touched = true; });
+  persistReceipts();
+  log('bon', 'participants changed', { count: order.length });
+  toast(before.includes(pid) ? `${personName(pid)} ist raus` : `${personName(pid)} ist dabei`);
 }
 
 function removePerson(p) {
@@ -405,7 +451,7 @@ function setKind(item, kind) {
   item.kind = kind;
   if (kind === 'deposit' || kind === 'deposit_return') {
     item.categoryId = state.settings.depositCategoryId;
-    item.split = evenSplit(personIds());
+    item.split = evenSplit(activePids());
     if (kind === 'deposit_return' && item.priceCents > 0) {
       item.priceCents = -item.priceCents;
       item.priceInput = (item.priceCents / 100).toFixed(2).replace('.', ',');
@@ -519,7 +565,7 @@ async function confirmAnalyze() {
       // Neu-Analyse: bestehenden Bon ersetzen, Kosten pro Bon KUMULIEREN.
       r = state.receipts.find((x) => x.id === job.forReceiptId);
       if (!r) return;
-      r.items = itemsFromAnalysis(result);
+      r.items = itemsFromAnalysis(result, receiptPersonIds(r, state.settings));
       if (result.store) r.store = result.store;
       if (/^\d{4}-\d{2}-\d{2}$/.test(result.date || '')) r.date = result.date;
       r.totalCents = toCents(result.total);
@@ -598,8 +644,7 @@ function loadImage(file) {
 
 // Positionsliste aus einem Analyse-Ergebnis bauen (inkl. Regel-Anwendung) —
 // genutzt für neue Bons UND für die Neu-Analyse bestehender Bons.
-function itemsFromAnalysis(result) {
-  const pids = personIds();
+function itemsFromAnalysis(result, pids = defaultParticipantIds(state.settings)) {
   let items = (result.items || []).map((it) => {
     let split = evenSplit(pids);
     let needsReview = false;
@@ -671,7 +716,7 @@ function formatDate(iso) {
 
 // Tabelle als Text (Tab-getrennt, für Excel/Numbers) in die Zwischenablage.
 function summaryToTSV(summary, title) {
-  const pids = personIds();
+  const pids = summary.personIds || personIds();
   const euro = (c) => (c / 100).toFixed(2).replace('.', ',');
   const lines = [[title, ...pids.map(personName)].join('\t')];
   summary.rows.forEach((row) => {
@@ -1035,7 +1080,8 @@ const app = createApp({
       openOriginals, openPdf,
       addItem, removeItem, onPriceInput, onTotalInput, setQuickSplit, splitMode, splitLabel,
       applySplitEditor, editorResult, onSplitSlider, toggleLock, setKind, finalizeReceipt, reopenReceipt, discardChanges,
-      addPerson, removePerson,
+      addPerson, removePerson, togglePersonFixed, toggleParticipant,
+      activePids, guestPersons,
       summaryFor, copySummary, summaryToTSV, shiftMonth,
       sendChat, toggleVoice,
       persistSettings, persistReceipts, applyTheme,
@@ -1142,6 +1188,14 @@ const app = createApp({
             <template v-else><span v-html="ic('warn', 16)"></span> Differenz {{ fmt(totalsDiff, { sign: true }) }} zu den Positionen</template>
           </div>
         </div>
+        <div v-if="guestPersons().length" class="who-row">
+          <span class="who-label">Dabei:</span>
+          <button v-for="p in state.settings.persons" :key="p.id" class="chip chip-btn"
+                  :class="{ active: activePids().includes(p.id), fixed: !p.optional }"
+                  :disabled="!p.optional" @click="toggleParticipant(p.id)">
+            <span v-if="p.optional && !activePids().includes(p.id)">+ </span>{{ p.name }}
+          </button>
+        </div>
         <button v-if="receipt.attachmentCount" class="btn btn-ghost" @click="openOriginals(receipt)">
           <span v-html="ic('receipt', 18)"></span> Original ansehen ({{ receipt.attachmentCount }})
         </button>
@@ -1161,8 +1215,8 @@ const app = createApp({
               <option v-for="c in state.settings.categories" :key="c.id" :value="c.id">{{ c.name }}</option>
             </select>
             <div class="split-btns">
-              <button v-for="p in state.settings.persons" :key="p.id" :class="{ active: splitMode(item) === p.id }" @click="setQuickSplit(item, p.id)">{{ p.name }}</button>
-              <button :class="{ active: splitMode(item) === 'shared' }" @click="setQuickSplit(item, 'shared')">{{ personIds().length === 2 ? '50:50' : 'teilen' }}</button>
+              <button v-for="pid in activePids()" :key="pid" :class="{ active: splitMode(item) === pid }" @click="setQuickSplit(item, pid)">{{ personName(pid) }}</button>
+              <button :class="{ active: splitMode(item) === 'shared' }" @click="setQuickSplit(item, 'shared')">{{ activePids().length === 2 ? '50:50' : 'teilen' }}</button>
               <button :class="{ active: splitMode(item) === 'custom' }" @click="setQuickSplit(item, 'custom')">%</button>
             </div>
           </div>
@@ -1209,24 +1263,24 @@ const app = createApp({
           <div class="sum-total">{{ fmt(summary.grandTotal) }}</div>
         </div>
         <div class="table-scroll"><table class="sum-table">
-          <thead><tr><th></th><th v-for="pid in personIds()" :key="pid">{{ personName(pid) }}</th></tr></thead>
+          <thead><tr><th></th><th v-for="pid in summary.personIds" :key="pid">{{ personName(pid) }}</th></tr></thead>
           <tbody>
             <template v-for="row in summary.rows" :key="row.categoryId">
-              <tr v-if="personIds().some((pid) => row.single[pid] !== 0)">
+              <tr v-if="summary.personIds.some((pid) => row.single[pid] !== 0)">
                 <td>{{ row.name }} einzeln</td>
-                <td v-for="pid in personIds()" :key="pid" class="num">{{ fmt(row.single[pid]) }}</td>
+                <td v-for="pid in summary.personIds" :key="pid" class="num">{{ fmt(row.single[pid]) }}</td>
               </tr>
               <tr v-if="row.sharedTotal !== 0">
                 <td>{{ row.name }} teilen <span class="mut">({{ fmt(row.sharedTotal) }} gesamt)</span></td>
-                <td v-for="pid in personIds()" :key="pid" class="num">{{ fmt(row.sharedPer[pid]) }}</td>
+                <td v-for="pid in summary.personIds" :key="pid" class="num">{{ fmt(row.sharedPer[pid]) }}</td>
               </tr>
               <tr class="cat-total">
                 <td>{{ row.name }} gesamt<div v-if="showNames(row)" class="cat-items">({{ row.itemNames.join(', ') }})</div></td>
-                <td v-for="pid in personIds()" :key="pid" class="num">{{ fmt(row.single[pid] + row.sharedPer[pid]) }}</td>
+                <td v-for="pid in summary.personIds" :key="pid" class="num">{{ fmt(row.single[pid] + row.sharedPer[pid]) }}</td>
               </tr>
             </template>
           </tbody>
-          <tfoot><tr><td>Gesamt pro Person</td><td v-for="pid in personIds()" :key="pid" class="num strong">{{ fmt(summary.personTotals[pid]) }}</td></tr></tfoot>
+          <tfoot><tr><td>Gesamt pro Person</td><td v-for="pid in summary.personIds" :key="pid" class="num strong">{{ fmt(summary.personTotals[pid]) }}</td></tr></tfoot>
         </table></div>
         <div class="sum-actions">
           <button class="btn btn-ghost" @click="copySummary(summary, (receipt.store || 'Bon') + ' ' + formatDate(receipt.date))"><span v-html="ic('copy', 18)"></span> Tabelle kopieren</button>
@@ -1254,24 +1308,24 @@ const app = createApp({
           <div class="sum-total">{{ fmt(month.grandTotal) }}</div>
         </div>
         <div class="table-scroll"><table class="sum-table">
-          <thead><tr><th></th><th v-for="pid in personIds()" :key="pid">{{ personName(pid) }}</th></tr></thead>
+          <thead><tr><th></th><th v-for="pid in month.personIds" :key="pid">{{ personName(pid) }}</th></tr></thead>
           <tbody>
             <template v-for="row in month.rows" :key="row.categoryId">
-              <tr v-if="personIds().some((pid) => row.single[pid] !== 0)">
+              <tr v-if="month.personIds.some((pid) => row.single[pid] !== 0)">
                 <td>{{ row.name }} einzeln</td>
-                <td v-for="pid in personIds()" :key="pid" class="num">{{ fmt(row.single[pid]) }}</td>
+                <td v-for="pid in month.personIds" :key="pid" class="num">{{ fmt(row.single[pid]) }}</td>
               </tr>
               <tr v-if="row.sharedTotal !== 0">
                 <td>{{ row.name }} teilen <span class="mut">({{ fmt(row.sharedTotal) }} gesamt)</span></td>
-                <td v-for="pid in personIds()" :key="pid" class="num">{{ fmt(row.sharedPer[pid]) }}</td>
+                <td v-for="pid in month.personIds" :key="pid" class="num">{{ fmt(row.sharedPer[pid]) }}</td>
               </tr>
               <tr class="cat-total">
                 <td>{{ row.name }} gesamt<div v-if="showNames(row)" class="cat-items">({{ row.itemNames.join(', ') }})</div></td>
-                <td v-for="pid in personIds()" :key="pid" class="num">{{ fmt(row.single[pid] + row.sharedPer[pid]) }}</td>
+                <td v-for="pid in month.personIds" :key="pid" class="num">{{ fmt(row.single[pid] + row.sharedPer[pid]) }}</td>
               </tr>
             </template>
           </tbody>
-          <tfoot><tr><td>Gesamt pro Person</td><td v-for="pid in personIds()" :key="pid" class="num strong">{{ fmt(month.personTotals[pid]) }}</td></tr></tfoot>
+          <tfoot><tr><td>Gesamt pro Person</td><td v-for="pid in month.personIds" :key="pid" class="num strong">{{ fmt(month.personTotals[pid]) }}</td></tr></tfoot>
         </table></div>
         <div class="sum-actions">
           <button class="btn btn-ghost" @click="copySummary(month, 'Monat ' + monthLabel(state.monthKey))"><span v-html="ic('copy', 18)"></span> Tabelle kopieren</button>
@@ -1366,13 +1420,18 @@ const app = createApp({
         <div class="acc-body" v-if="state.settingsOpen.personen">
           <div v-for="p in state.settings.persons" :key="p.id" class="cat-row">
             <input v-model="p.name" @change="persistSettings">
+            <button class="chip chip-btn who-toggle" :class="{ active: !p.optional }" @click="togglePersonFixed(p)"
+                    :title="p.optional ? 'Gast — nur bei ausgewählten Bons dabei' : 'Immer dabei'">
+              {{ p.optional ? 'Gast' : 'immer' }}
+            </button>
             <button class="iconbtn small" @click="removePerson(p)" v-html="ic('trash', 16)" :disabled="state.settings.persons.length <= 2" aria-label="Person entfernen"></button>
           </div>
           <div class="cat-row">
             <input v-model="state.newPersonName" placeholder="Neue Person …" @keyup.enter="addPerson">
             <button class="iconbtn small accent" @click="addPerson" v-html="ic('plus', 18)" aria-label="Person hinzufügen"></button>
           </div>
-          <div class="hint">„teilen" heißt immer: exakt gleichmäßig auf ALLE Personen. Pfand und Leergut werden ebenfalls auf alle gleichmäßig verteilt. Über den %-Knopf an jeder Position lässt sich jede Person einzeln prozentual beteiligen.</div>
+          <div class="hint"><b>Gast vs. immer:</b> „immer" heißt, die Person ist bei jedem neuen Bon dabei. Ein <b>Gast</b> taucht nirgends auf, bis du ihn an einem Bon über „Dabei:" dazuschaltest — so bläht eine selten beteiligte Person die Abrechnung nicht mit leeren Spalten auf. In der Monatsübersicht erscheint ein Gast nur in den Monaten, in denen er wirklich dabei war.</div>
+          <div class="hint">„teilen" heißt immer: exakt gleichmäßig auf ALLE am Bon Beteiligten. Pfand und Leergut werden ebenfalls auf alle gleichmäßig verteilt. Über den %-Knopf an jeder Position lässt sich jede Person einzeln prozentual beteiligen.</div>
         </div>
       </div>
 
