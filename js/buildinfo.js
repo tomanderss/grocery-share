@@ -1,8 +1,16 @@
 // Auto-generiert von build.js — nicht manuell bearbeiten!
-export const BUILD      = '0.18';
-export const BUILD_HASH = '9af69f9';
+export const BUILD      = '0.19';
+export const BUILD_HASH = '943bced';
 
 export const CHANGELOG = [
+  {
+    "version": "0.19",
+    "date": "22.10.2026",
+    "changes": [
+      "Netto-Bons (METRO & Co.): pro Bon zwischen „brutto\" und „netto + MwSt.\" umschaltbar. Im Netto-Modus steht an jeder Position der erkannte Steuersatz (7 %, 19 % oder was sonst auf dem Bon steht, direkt änderbar) plus netto → brutto; gerechnet und geteilt wird immer brutto",
+      "Die KI erkennt Netto-Bons am Steuerblock und am Kürzel hinter der Artikelzeile selbst und trägt den Satz je Position ein; in der Bon-Kopfzeile steht Netto · MwSt. · Brutto zum Abgleich"
+    ]
+  },
   {
     "version": "0.18",
     "date": "22.10.2026",
