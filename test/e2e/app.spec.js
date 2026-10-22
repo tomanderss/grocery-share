@@ -467,7 +467,7 @@ test.describe('Gäste', () => {
 
     await seedReceipt(page, { store: 'REWE', items: [item({ priceCents: 900, priceInput: '9,00' })] });
     // Review zeigt die Dabei-Zeile; Tjure ist noch draußen
-    await expect(page.locator('.who-row')).toContainText('Tjure');
+    await expect(page.locator('.who-row:not(.price-mode)')).toContainText('Tjure');
     await expect(page.locator('.split-btns button')).toHaveCount(4); // Tom, Tara, teilen, %
 
     // Auswertung: nur zwei Personen-Spalten, keine leere Gast-Spalte
@@ -482,7 +482,7 @@ test.describe('Gäste', () => {
     await addGuest(page);
     await seedReceipt(page, { store: 'REWE', items: [item({ priceCents: 900, priceInput: '9,00' })] });
 
-    await page.locator('.who-row .chip-btn', { hasText: 'Tjure' }).click();
+    await page.locator('.who-row:not(.price-mode) .chip-btn', { hasText: 'Tjure' }).click();
     // 900 ct geteilt durch drei
     await expect(page.locator('.split-btns button')).toHaveCount(5);
     const split = await page.evaluate(() => window.__gs.state.receipts[0].items[0].split);
@@ -512,7 +512,7 @@ test.describe('Gäste', () => {
     // Zweiter Bon MIT Gast im selben Monat
     await page.locator('.topbar .iconbtn').click();
     await seedReceipt(page, { store: 'B', items: [item({ priceCents: 900, priceInput: '9,00' })] });
-    await page.locator('.who-row .chip-btn', { hasText: 'Tjure' }).click();
+    await page.locator('.who-row:not(.price-mode) .chip-btn', { hasText: 'Tjure' }).click();
     await page.locator('.review-actions .btn-primary').click();
     await page.waitForSelector('.screen.summary');
     await page.locator('.screen.summary .btn-primary').click();
@@ -535,5 +535,64 @@ test.describe('Gäste', () => {
     // jetzt ist er bei neuen Bons automatisch dabei
     await seedReceipt(page, { store: 'REWE', items: [item()] });
     await expect(page.locator('.split-btns button')).toHaveCount(5);
+  });
+});
+
+test.describe('Netto-Bons (MwSt. aufschlagen)', () => {
+  test('Umschalten rechnet die Positionen brutto und zeigt den Satz je Position', async ({ page }) => {
+    await gotoApp(page);
+    await seedReceipt(page, {
+      store: 'METRO',
+      items: [
+        item({ name: 'Mehl', priceCents: 1000, priceInput: '10,00', vatRate: 7 }),
+        item({ id: 'pos_b', name: 'Spülmittel', priceCents: 1000, priceInput: '10,00', vatRate: 19 }),
+      ],
+    });
+    // Default ist brutto — keine Steuer-Marker
+    await expect(page.locator('.item-badges .vat-pick')).toHaveCount(0);
+    await expect(page.locator('.meta-check')).toContainText('20,00 €');
+
+    // Auf netto umschalten
+    await page.locator('.price-mode .chip-btn', { hasText: 'netto' }).click();
+    await expect(page.locator('.item-badges .vat-pick')).toHaveCount(2);
+    await expect(page.locator('.item-badges').first()).toContainText('netto 10,00 € → brutto 10,70 €');
+    await expect(page.locator('.item-badges').nth(1)).toContainText('brutto 11,90 €');
+    await expect(page.locator('.vat-sum')).toContainText('Netto 20,00 €');
+    await expect(page.locator('.vat-sum')).toContainText('MwSt. 2,60 €');
+    await expect(page.locator('.vat-sum')).toContainText('Brutto 22,60 €');
+
+    // Satz einer Position korrigieren → Summen ziehen nach
+    await page.locator('.item-badges .vat-pick').first().selectOption('19');
+    await expect(page.locator('.vat-sum')).toContainText('Brutto 23,80 €');
+
+    // Auswertung rechnet mit Brutto
+    await page.locator('.review-actions .btn-primary').click();
+    await page.waitForSelector('.screen.summary');
+    await expect(page.locator('.sum-total')).toHaveText('23,80 €');
+    const foot = page.locator('.sum-table tfoot td.num');
+    await expect(foot.nth(0)).toHaveText('11,90 €');
+  });
+
+  test('zurück auf brutto lässt die Beträge wie eingegeben', async ({ page }) => {
+    await gotoApp(page);
+    await seedReceipt(page, {
+      store: 'METRO', netPrices: true,
+      items: [item({ name: 'Mehl', priceCents: 1000, priceInput: '10,00', vatRate: 19 })],
+    });
+    await expect(page.locator('.meta-check')).toContainText('11,90 €');
+    await page.locator('.price-mode .chip-btn', { hasText: 'brutto' }).click();
+    await expect(page.locator('.item-badges .vat-pick')).toHaveCount(0);
+    await expect(page.locator('.meta-check')).toContainText('10,00 €');
+  });
+
+  test('Position ohne erkannten Satz wird markiert statt geraten', async ({ page }) => {
+    await gotoApp(page);
+    await seedReceipt(page, {
+      store: 'METRO', netPrices: true,
+      items: [item({ name: 'Unbekannt', priceCents: 1000, priceInput: '10,00' })],
+    });
+    // 0 % → Warn-Chip, Betrag unverändert (kein stiller Aufschlag)
+    await expect(page.locator('.item-badges .chip-warn')).toContainText('MwSt.');
+    await expect(page.locator('.item-badges').first()).toContainText('brutto 10,00 €');
   });
 });

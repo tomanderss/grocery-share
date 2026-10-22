@@ -13,6 +13,7 @@ import {
   formatCents, toCents, evenSplit, normalizeSplit, isEvenSplit, proportionalSplit, rebalanceSplit,
   receiptSummary, monthSummary, itemsTotal, receiptMonth,
   receiptPersonIds, defaultParticipantIds, reassignSplits,
+  VAT_RATES, grossCents, vatTotals,
 } from './receipt.js';
 import {
   applyRules, learnFromReceipt, rulesForPrompt, normalizeKey, normalizeRules,
@@ -146,7 +147,7 @@ function currentReceipt() {
   return state.receipts.find((r) => r.id === state.currentId) || null;
 }
 
-function newDraft({ store = '', date = '', totalCents = 0, items = [], notes = '', apiCost = null, participantIds = null } = {}) {
+function newDraft({ store = '', date = '', totalCents = 0, items = [], notes = '', apiCost = null, participantIds = null, netPrices = false } = {}) {
   const r = {
     id: newId('bon'),
     store,
@@ -158,6 +159,8 @@ function newDraft({ store = '', date = '', totalCents = 0, items = [], notes = '
     apiCost, // { usd, model, inputTokens, outputTokens } der KI-Analyse, sonst null
     // Wer an DIESEM Bon beteiligt ist. Standard = feste Besetzung (ohne Gäste).
     participantIds: participantIds || defaultParticipantIds(state.settings),
+    // Netto-Bon (Großhandel): priceCents sind NETTO, vatRate je Position schlägt auf.
+    netPrices,
     items,
   };
   state.receipts.unshift(r);
@@ -392,6 +395,33 @@ function applySplitEditor() {
   state.splitEditor = null;
 }
 
+// ── Umsatzsteuer (Netto-Bons) ───────────────────────────────────────────────
+// Umschalter am Bon. Beim Einschalten bekommen Positionen ohne erkannten Satz
+// keinen Default aufgedrückt — 0 % ist ehrlicher als ein geratener Aufschlag;
+// der Marker an der Position weist darauf hin.
+function toggleNetPrices() {
+  const r = currentReceipt();
+  if (!r) return;
+  r.netPrices = !r.netPrices;
+  persistReceipts();
+  log('bon', 'net prices toggled', { on: r.netPrices });
+  toast(r.netPrices
+    ? 'Nettopreise: die MwSt. wird je Position aufgeschlagen'
+    : 'Zurück zu Bruttopreisen — die Beträge stehen wie eingegeben');
+}
+
+function setVatRate(item, rate) {
+  item.vatRate = Math.max(0, Number(rate) || 0);
+  item.touched = true;
+  persistReceipts();
+}
+
+// Auswahl je Position: die üblichen Sätze plus den tatsächlich erkannten.
+function vatOptions(item) {
+  const r = Math.max(0, Number(item?.vatRate) || 0);
+  return [...new Set([...VAT_RATES, r])].sort((a, b) => a - b);
+}
+
 // ── Personen-Verwaltung ──────────────────────────────────────────────────────
 // Neue Personen starten als GAST: sie erscheinen nur in Bons, bei denen sie
 // ausdrücklich dazugeschaltet werden — sonst stünde eine dritte Person ab sofort
@@ -565,6 +595,7 @@ async function confirmAnalyze() {
       // Neu-Analyse: bestehenden Bon ersetzen, Kosten pro Bon KUMULIEREN.
       r = state.receipts.find((x) => x.id === job.forReceiptId);
       if (!r) return;
+      r.netPrices = !!result.netPrices;
       r.items = itemsFromAnalysis(result, receiptPersonIds(r, state.settings));
       if (result.store) r.store = result.store;
       if (/^\d{4}-\d{2}-\d{2}$/.test(result.date || '')) r.date = result.date;
@@ -661,6 +692,7 @@ function itemsFromAnalysis(result, pids = defaultParticipantIds(state.settings))
       priceCents,
       priceInput: (priceCents / 100).toFixed(2).replace('.', ','),
       discountCents: Math.max(0, toCents(it.discount)), // bereits in priceCents eingerechnet
+      vatRate: Math.max(0, Number(it.vatRate) || 0), // nur bei Netto-Bons relevant
 
       categoryId: state.settings.categories.some((c) => c.id === it.categoryId)
         ? it.categoryId : state.settings.defaultCategoryId,
@@ -682,6 +714,7 @@ function buildDraftFromAnalysis(result, usage = null) {
     date: /^\d{4}-\d{2}-\d{2}$/.test(result.date || '') ? result.date : new Date().toISOString().slice(0, 10),
     totalCents: toCents(result.total),
     notes: result.notes || '',
+    netPrices: !!result.netPrices, // Großhandels-Bon: Preise sind netto
     apiCost: usage
       ? { usd: costUsd(usage.model, usage.inputTokens, usage.outputTokens), ...usage }
       : null,
@@ -1049,6 +1082,8 @@ const app = createApp({
   setup() {
     const receipt = computed(currentReceipt);
     const summary = computed(() => (receipt.value ? summaryFor(receipt.value) : null));
+    // Netto/Steuer/Brutto des offenen Bons — nur bei Netto-Bons befüllt
+    const vat = computed(() => (receipt.value ? vatTotals(receipt.value, state.settings) : null));
     const month = computed(() => monthFor(state.monthKey));
     const monthReceipts = computed(() => receiptsOfMonth(state.monthKey));
     const totalsDiff = computed(() => {
@@ -1081,6 +1116,7 @@ const app = createApp({
       addItem, removeItem, onPriceInput, onTotalInput, setQuickSplit, splitMode, splitLabel,
       applySplitEditor, editorResult, onSplitSlider, toggleLock, setKind, finalizeReceipt, reopenReceipt, discardChanges,
       addPerson, removePerson, togglePersonFixed, toggleParticipant,
+      toggleNetPrices, setVatRate, vatOptions, grossCents, vat,
       activePids, guestPersons,
       summaryFor, copySummary, summaryToTSV, shiftMonth,
       sendChat, toggleVoice,
@@ -1188,6 +1224,14 @@ const app = createApp({
             <template v-else><span v-html="ic('warn', 16)"></span> Differenz {{ fmt(totalsDiff, { sign: true }) }} zu den Positionen</template>
           </div>
         </div>
+        <div class="who-row price-mode">
+          <span class="who-label">Preise:</span>
+          <button class="chip chip-btn" :class="{ active: !receipt.netPrices }" @click="receipt.netPrices && toggleNetPrices()">brutto</button>
+          <button class="chip chip-btn" :class="{ active: receipt.netPrices }" @click="!receipt.netPrices && toggleNetPrices()">netto + MwSt.</button>
+          <span v-if="receipt.netPrices && vat" class="mut vat-sum">
+            Netto {{ fmt(vat.netCents) }} · MwSt. {{ fmt(vat.vatCents) }} · Brutto {{ fmt(vat.grossCents) }}
+          </span>
+        </div>
         <div v-if="guestPersons().length" class="who-row">
           <span class="who-label">Dabei:</span>
           <button v-for="p in state.settings.persons" :key="p.id" class="chip chip-btn"
@@ -1224,6 +1268,15 @@ const app = createApp({
             <span v-if="item.kind !== 'normal'" class="chip chip-accent">{{ kindLabel(item.kind) }} — immer gleichmäßig auf alle geteilt, Kategorie {{ categoryName(state.settings.depositCategoryId) }}</span>
             <span v-else class="chip">{{ splitLabel(item) }}</span>
             <span v-if="item.discountCents" class="chip chip-good">inkl. {{ fmt(item.discountCents) }} Rabatt</span>
+            <template v-if="receipt.netPrices">
+              <span class="chip" :class="item.vatRate ? 'chip-accent' : 'chip-warn'">
+                <select class="vat-pick" :value="item.vatRate || 0" @change="setVatRate(item, $event.target.value)">
+                  <option v-for="r in vatOptions(item)" :key="r" :value="r">{{ r }} %</option>
+                </select>
+                MwSt.
+              </span>
+              <span class="chip chip-good">netto {{ fmt(item.priceCents) }} → brutto {{ fmt(grossCents(item.priceCents, item.vatRate)) }}</span>
+            </template>
             <span v-if="item.fromRule" class="chip chip-good" title="Aus gelernter Regel">gelernt ✓</span>
             <span v-if="item.needsReview" class="chip chip-warn">Zuordnung prüfen</span>
             <button class="chip chip-btn" v-if="item.kind === 'normal'" @click="setKind(item, 'deposit')">als Pfand</button>

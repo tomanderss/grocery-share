@@ -4,6 +4,7 @@ import {
   toCents, formatCents, evenSplit, isEvenSplit, normalizeSplit, proportionalSplit, rebalanceSplit,
   splitAmount, effectiveItem, receiptSummary, itemsTotal, monthSummary, receiptMonth,
   receiptPersonIds, defaultParticipantIds, reassignSplits, splitEvenly,
+  grossCents, vatTotals, VAT_RATES,
 } from '../../js/receipt.js';
 
 const SETTINGS = {
@@ -406,5 +407,71 @@ describe('„teilen" ergibt identische Beträge', () => {
     const row = s.rows.find((r) => r.categoryId === 'einkaufen');
     assert.deepEqual(row.sharedPer, { p1: 300, p2: 300, p3: 300 });
     assert.equal(row.sharedTotal, 900);
+  });
+});
+
+describe('Netto-Bons (MwSt. wird aufgeschlagen)', () => {
+  test('grossCents schlägt den Satz auf, 0 lässt den Betrag unberührt', () => {
+    assert.equal(grossCents(1000, 19), 1190);
+    assert.equal(grossCents(1000, 7), 1070);
+    assert.equal(grossCents(1000, 0), 1000);
+    assert.equal(grossCents(1000, null), 1000);
+    assert.equal(grossCents(420, 19), 500);          // 4,20 → 5,00 (kaufmännisch)
+    assert.equal(grossCents(-1000, 19), -1190);      // Leergut bleibt negativ
+    assert.deepEqual(VAT_RATES, [0, 7, 19]);
+  });
+
+  test('effectiveItem rechnet nur bei netPrices hoch', () => {
+    const it = item({ priceCents: 1000, vatRate: 19 });
+    assert.equal(effectiveItem(it, SETTINGS, ['p1', 'p2']).priceCents, 1000);        // Brutto-Bon
+    assert.equal(effectiveItem(it, SETTINGS, ['p1', 'p2'], true).priceCents, 1190);  // Netto-Bon
+  });
+
+  test('Auswertung und Positionssumme rechnen brutto', () => {
+    const r = {
+      netPrices: true,
+      items: [
+        item({ id: 'a', priceCents: 1000, vatRate: 19 }),              // → 11,90
+        item({ id: 'b', priceCents: 1000, vatRate: 7 }),               // → 10,70
+        item({ id: 'c', priceCents: 500, vatRate: 0 }),                // → 5,00 (kein Satz)
+      ],
+    };
+    assert.equal(itemsTotal(r, SETTINGS), 1190 + 1070 + 500);
+    const s = receiptSummary(r, SETTINGS);
+    assert.equal(s.grandTotal, 2760);
+    assert.equal(s.personTotals.p1, 1380);
+    assert.equal(s.personTotals.p2, 1380);
+    // derselbe Bon ohne Netto-Schalter bleibt bei den gedruckten Beträgen
+    assert.equal(receiptSummary({ ...r, netPrices: false }, SETTINGS).grandTotal, 2500);
+  });
+
+  test('vatTotals schlüsselt nach Satz auf (Abgleich mit dem Steuerblock)', () => {
+    const r = {
+      netPrices: true,
+      items: [
+        item({ id: 'a', priceCents: 1000, vatRate: 19 }),
+        item({ id: 'b', priceCents: 2000, vatRate: 7 }),
+        item({ id: 'c', priceCents: 500, vatRate: 19 }),
+      ],
+    };
+    const v = vatTotals(r, SETTINGS);
+    assert.equal(v.netCents, 3500);
+    assert.equal(v.grossCents, 1190 + 2140 + 595);
+    assert.equal(v.vatCents, v.grossCents - v.netCents);
+    assert.equal(v.byRate[19].netCents, 1500);
+    assert.equal(v.byRate[7].netCents, 2000);
+    assert.equal(v.byRate[7].vatCents, 140);
+    // Brutto-Bon: keine Aufschlüsselung
+    assert.deepEqual(vatTotals({ items: r.items }, SETTINGS).byRate, {});
+  });
+
+  test('Pfand im Netto-Bon folgt seinem eigenen Satz', () => {
+    const r = {
+      netPrices: true,
+      items: [item({ kind: 'deposit', priceCents: 25, vatRate: 19 })],
+    };
+    assert.equal(itemsTotal(r, SETTINGS), 30); // 0,25 netto → 0,30 brutto
+    const leergut = { netPrices: true, items: [item({ kind: 'deposit_return', priceCents: 25, vatRate: 19 })] };
+    assert.equal(itemsTotal(leergut, SETTINGS), -30); // Vorzeichen vor der Steuer
   });
 });
