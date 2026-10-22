@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   toCents, formatCents, evenSplit, isEvenSplit, normalizeSplit, proportionalSplit, rebalanceSplit,
   splitAmount, effectiveItem, receiptSummary, itemsTotal, monthSummary, receiptMonth,
+  receiptPersonIds, defaultParticipantIds, reassignSplits, splitEvenly,
 } from '../../js/receipt.js';
 
 const SETTINGS = {
@@ -282,5 +283,128 @@ describe('monthSummary', () => {
   test('receiptMonth nutzt das Datum, sonst createdAt', () => {
     assert.equal(receiptMonth({ date: '2026-07-21' }), '2026-07');
     assert.equal(receiptMonth({ date: '', createdAt: Date.UTC(2026, 0, 15) }), '2026-01');
+  });
+});
+
+describe('Gäste (optionale Personen)', () => {
+  // Tom & Tara fest, Tjure als Gast
+  const SG = {
+    ...SETTINGS,
+    persons: [
+      { id: 'p1', name: 'Tom' },
+      { id: 'p2', name: 'Tara' },
+      { id: 'p3', name: 'Tjure', optional: true },
+    ],
+  };
+
+  test('ohne Angabe zählt nur die feste Besetzung — Gäste bleiben draußen', () => {
+    assert.deepEqual(defaultParticipantIds(SG), ['p1', 'p2']);
+    assert.deepEqual(receiptPersonIds({ items: [] }, SG), ['p1', 'p2']);
+    assert.deepEqual(receiptPersonIds(null, SG), ['p1', 'p2']);
+    // Altbestand ohne participantIds verhält sich wie bisher
+    assert.deepEqual(receiptPersonIds({ date: '2026-01-01' }, SETTINGS), ['p1', 'p2']);
+  });
+
+  test('ein Bon kann den Gast ausdrücklich führen; Reihenfolge bleibt stabil', () => {
+    assert.deepEqual(receiptPersonIds({ participantIds: ['p3', 'p1'] }, SG), ['p1', 'p3']);
+    // gelöschte Personen werden ausgefiltert
+    assert.deepEqual(receiptPersonIds({ participantIds: ['p1', 'p9'] }, SG), ['p1']);
+    // leere Liste → feste Besetzung statt niemand
+    assert.deepEqual(receiptPersonIds({ participantIds: [] }, SG), ['p1', 'p2']);
+  });
+
+  test('sind alle Gäste, fällt die Besetzung auf alle zurück (nie leer)', () => {
+    const allGuests = { ...SETTINGS, persons: [{ id: 'p1', name: 'A', optional: true }, { id: 'p2', name: 'B', optional: true }] };
+    assert.deepEqual(defaultParticipantIds(allGuests), ['p1', 'p2']);
+  });
+
+  test('Auswertung zeigt nur die beteiligten Spalten', () => {
+    const ohne = receiptSummary({ items: [item({ priceCents: 1000 })] }, SG);
+    assert.deepEqual(ohne.personIds, ['p1', 'p2']);
+    assert.equal(ohne.personTotals.p3, undefined);        // keine leere Gast-Spalte
+    assert.equal(ohne.personTotals.p1, 500);
+
+    const mit = receiptSummary(
+      { participantIds: ['p1', 'p2', 'p3'], items: [item({ priceCents: 900, split: { p1: 34, p2: 33, p3: 33 } })] },
+      SG
+    );
+    assert.deepEqual(mit.personIds, ['p1', 'p2', 'p3']);
+    assert.equal(mit.personTotals.p1 + mit.personTotals.p2 + mit.personTotals.p3, 900);
+  });
+
+  test('Monat: Gast-Spalte nur, wenn er in dem Monat dabei war', () => {
+    const receipts = [
+      { status: 'final', date: '2026-03-02', items: [item({ priceCents: 1000 })] },
+      { status: 'final', date: '2026-04-05', participantIds: ['p1', 'p2', 'p3'],
+        items: [item({ priceCents: 900, split: { p1: 34, p2: 33, p3: 33 } })] },
+    ];
+    assert.deepEqual(monthSummary(receipts, SG, '2026-03').personIds, ['p1', 'p2']);
+    assert.deepEqual(monthSummary(receipts, SG, '2026-04').personIds, ['p1', 'p2', 'p3']);
+    // leerer Monat → feste Besetzung als Kopfzeile
+    assert.deepEqual(monthSummary(receipts, SG, '2026-05').personIds, ['p1', 'p2']);
+  });
+
+  test('Monat mischt Bons mit unterschiedlicher Besetzung korrekt', () => {
+    const receipts = [
+      // 50:50 geteilt — muss "teilen" bleiben, auch wenn im Monat ein Gast vorkommt
+      { status: 'final', date: '2026-04-01', items: [item({ priceCents: 1000 })] },
+      { status: 'final', date: '2026-04-05', participantIds: ['p1', 'p2', 'p3'],
+        items: [item({ id: 'b', priceCents: 900, split: { p1: 100, p2: 0, p3: 0 } })] },
+    ];
+    const m = monthSummary(receipts, SG, '2026-04');
+    const row = m.rows.find((r) => r.categoryId === 'einkaufen');
+    assert.equal(row.sharedTotal, 1000);                  // der 50:50-Bon zählt als geteilt
+    assert.equal(row.sharedPer.p3, 0);                    // der Gast war dort nicht dabei
+    assert.equal(row.single.p1, 900);                     // der Solo-Posten als einzeln
+    assert.equal(m.personTotals.p1, 500 + 900);
+    assert.equal(m.personTotals.p2, 500);
+    assert.equal(m.personTotals.p3, 0);
+    assert.equal(m.grandTotal, 1900);
+  });
+
+  test('reassignSplits: geteilt bleibt geteilt, Rest wird normalisiert', () => {
+    const items = [
+      item({ id: 'a', split: { p1: 50, p2: 50 } }),       // geteilt
+      item({ id: 'b', split: { p1: 100, p2: 0 } }),       // nur Tom
+    ];
+    const out = reassignSplits(items, ['p1', 'p2'], ['p1', 'p2', 'p3']);
+    assert.deepEqual(out[0].split, evenSplit(['p1', 'p2', 'p3'])); // jetzt zu dritt geteilt
+    assert.deepEqual(out[1].split, { p1: 100, p2: 0, p3: 0 });     // bleibt bei Tom
+    // Gast wieder raus
+    const back = reassignSplits(out, ['p1', 'p2', 'p3'], ['p1', 'p2']);
+    assert.deepEqual(back[0].split, { p1: 50, p2: 50 });
+    assert.equal(back[1].split.p1 + back[1].split.p2, 100);
+  });
+
+  test('Pfand wird auf die Beteiligten des Bons geteilt, nicht auf alle', () => {
+    const eff = effectiveItem(item({ kind: 'deposit', priceCents: 25 }), SG, ['p1', 'p2', 'p3']);
+    assert.deepEqual(eff.split, evenSplit(['p1', 'p2', 'p3']));
+    const eff2 = effectiveItem(item({ kind: 'deposit', priceCents: 25 }), SG);
+    assert.deepEqual(eff2.split, { p1: 50, p2: 50 });
+  });
+});
+
+describe('„teilen" ergibt identische Beträge', () => {
+  test('splitEvenly teilt ohne Prozent-Umweg (3 Personen, 9,00 €)', () => {
+    assert.deepEqual(splitEvenly(900, ['p1', 'p2', 'p3']), { p1: 300, p2: 300, p3: 300 });
+    // Restcents deterministisch nach vorn
+    assert.deepEqual(splitEvenly(1000, ['p1', 'p2', 'p3']), { p1: 334, p2: 333, p3: 333 });
+    // negative Beträge (Leergut) symmetrisch
+    assert.deepEqual(splitEvenly(-900, ['p1', 'p2', 'p3']), { p1: -300, p2: -300, p3: -300 });
+    assert.deepEqual(splitEvenly(-101, ['p1', 'p2']), { p1: -51, p2: -50 });
+    assert.deepEqual(splitEvenly(100, []), {});
+  });
+
+  test('Auswertung: geteilt heißt bei drei Personen wirklich je ein Drittel', () => {
+    const S3 = {
+      ...SETTINGS,
+      persons: [{ id: 'p1', name: 'A' }, { id: 'p2', name: 'B' }, { id: 'p3', name: 'C' }],
+    };
+    const s = receiptSummary({ items: [item({ priceCents: 900, split: { p1: 34, p2: 33, p3: 33 } })] }, S3);
+    // früher 306/297/297 — der Prozent-Umweg verzerrte die „teilen"-Zeile
+    assert.deepEqual(s.personTotals, { p1: 300, p2: 300, p3: 300 });
+    const row = s.rows.find((r) => r.categoryId === 'einkaufen');
+    assert.deepEqual(row.sharedPer, { p1: 300, p2: 300, p3: 300 });
+    assert.equal(row.sharedTotal, 900);
   });
 });

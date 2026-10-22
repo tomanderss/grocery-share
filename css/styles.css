@@ -260,3 +260,11 @@ label { display: flex; flex-direction: column; gap: 5px; font-size: .82rem; colo
 @media (min-width: 700px) {
   .app { padding-top: 24px; }
 }
+
+/* Beteiligte eines Bons: Gäste werden pro Bon dazugeschaltet, feste Personen
+   sind nicht abwählbar (daher disabled, aber ohne „kaputt"-Optik). */
+.who-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.who-label { font-size: .85rem; color: var(--text2); font-weight: 700; }
+.chip-btn.active { border-style: solid; border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.chip-btn.fixed:disabled { opacity: 1; cursor: default; }
+.who-toggle { flex: none; }

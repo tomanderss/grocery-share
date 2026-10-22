@@ -181,11 +181,13 @@ test.describe('Lernen & Monatsübersicht', () => {
 test.describe('Mehrere Personen', () => {
   test('dritte Person: Split-Buttons, Slider-Editor und Tabellenspalte', async ({ page }) => {
     await gotoApp(page);
-    // Lisa in den Einstellungen anlegen
+    // Lisa in den Einstellungen anlegen und auf „immer dabei" stellen
+    // (neue Personen starten als Gast — hier geht es um die feste Besetzung)
     await page.locator('.home-head .iconbtn').click();
     await page.locator('.acc-head', { hasText: 'Personen' }).click();
     await page.locator('.acc-body input[placeholder="Neue Person …"]').fill('Lisa');
     await page.locator('.acc-body .iconbtn.accent').click();
+    await page.locator('.cat-row .who-toggle').nth(2).click();
     await page.locator('.topbar .iconbtn').click();
     await expect(page.locator('.app-sub')).toContainText('Lisa');
 
@@ -443,5 +445,95 @@ test.describe('KI-Kosten', () => {
     // Bon-Liste auf Home zeigt Kosten
     await page.locator('.screen.summary .btn-primary').click();
     await expect(page.locator('.receipt-row .rr-api').first()).toContainText('KI ≈ 1,2 ¢');
+  });
+});
+
+test.describe('Gäste', () => {
+  // Legt Tjure als Gast an und kehrt auf die Startseite zurück.
+  async function addGuest(page, name = 'Tjure') {
+    await page.locator('.home-head .iconbtn').click();
+    await page.locator('.acc-head', { hasText: 'Personen' }).click();
+    await page.locator('.acc-body input[placeholder="Neue Person …"]').fill(name);
+    await page.locator('.acc-body .iconbtn.accent').click();
+    await page.locator('.topbar .iconbtn').click();
+  }
+
+  test('ein neuer Gast taucht erst auf, wenn er am Bon dazugeschaltet wird', async ({ page }) => {
+    await gotoApp(page);
+    await addGuest(page);
+    // Gast ist angelegt, aber nicht in der festen Besetzung
+    const persons = await page.evaluate(() => window.__gs.state.settings.persons.map((p) => [p.name, !!p.optional]));
+    expect(persons).toEqual([['Tom', false], ['Tara', false], ['Tjure', true]]);
+
+    await seedReceipt(page, { store: 'REWE', items: [item({ priceCents: 900, priceInput: '9,00' })] });
+    // Review zeigt die Dabei-Zeile; Tjure ist noch draußen
+    await expect(page.locator('.who-row')).toContainText('Tjure');
+    await expect(page.locator('.split-btns button')).toHaveCount(4); // Tom, Tara, teilen, %
+
+    // Auswertung: nur zwei Personen-Spalten, keine leere Gast-Spalte
+    await page.locator('.review-actions .btn-primary').click();
+    await page.waitForSelector('.screen.summary');
+    await expect(page.locator('.sum-table thead th')).toHaveCount(3);
+    await expect(page.locator('.sum-table thead')).not.toContainText('Tjure');
+  });
+
+  test('dazugeschaltet rechnet der Gast mit und geteilte Posten gehen auf drei', async ({ page }) => {
+    await gotoApp(page);
+    await addGuest(page);
+    await seedReceipt(page, { store: 'REWE', items: [item({ priceCents: 900, priceInput: '9,00' })] });
+
+    await page.locator('.who-row .chip-btn', { hasText: 'Tjure' }).click();
+    // 900 ct geteilt durch drei
+    await expect(page.locator('.split-btns button')).toHaveCount(5);
+    const split = await page.evaluate(() => window.__gs.state.receipts[0].items[0].split);
+    expect(split.p1 + split.p2 + split[Object.keys(split)[2]]).toBe(100);
+
+    await page.locator('.review-actions .btn-primary').click();
+    await page.waitForSelector('.screen.summary');
+    await expect(page.locator('.sum-table thead th')).toHaveCount(4);
+    await expect(page.locator('.sum-table thead')).toContainText('Tjure');
+    const foot = page.locator('.sum-table tfoot td.num');
+    await expect(foot.nth(0)).toHaveText('3,00 €');
+    await expect(foot.nth(2)).toHaveText('3,00 €');
+  });
+
+  test('Monatsübersicht zeigt den Gast nur im Monat seiner Teilnahme', async ({ page }) => {
+    await gotoApp(page);
+    await addGuest(page);
+    const monat = new Date().toISOString().slice(0, 7);
+    // Bon ohne Gast, abgeschlossen
+    await seedReceipt(page, { store: 'A', items: [item({ priceCents: 600, priceInput: '6,00' })] });
+    await page.locator('.review-actions .btn-primary').click();
+    await page.waitForSelector('.screen.summary');
+    await page.locator('.screen.summary .btn-primary').click();
+    await page.locator('.tile', { hasText: 'Monats' }).click();
+    await expect(page.locator('.screen.month .sum-table thead')).not.toContainText('Tjure');
+
+    // Zweiter Bon MIT Gast im selben Monat
+    await page.locator('.topbar .iconbtn').click();
+    await seedReceipt(page, { store: 'B', items: [item({ priceCents: 900, priceInput: '9,00' })] });
+    await page.locator('.who-row .chip-btn', { hasText: 'Tjure' }).click();
+    await page.locator('.review-actions .btn-primary').click();
+    await page.waitForSelector('.screen.summary');
+    await page.locator('.screen.summary .btn-primary').click();
+    await page.locator('.tile', { hasText: 'Monats' }).click();
+    await expect(page.locator('.screen.month .sum-table thead')).toContainText('Tjure');
+    // der 50:50-Bon bleibt trotz Gast im Monat eine "teilen"-Zeile
+    await expect(page.locator('.screen.month .sum-table')).toContainText('Einkaufen teilen');
+    expect(monat).toBeTruthy();
+  });
+
+  test('Gast lässt sich in den Einstellungen auf „immer" stellen', async ({ page }) => {
+    await gotoApp(page);
+    await addGuest(page);
+    await page.locator('.home-head .iconbtn').click(); // Akkordeon ist von addGuest noch offen
+    const toggle = page.locator('.cat-row .who-toggle').nth(2);
+    await expect(toggle).toHaveText('Gast');
+    await toggle.click();
+    await expect(toggle).toHaveText('immer');
+    await page.locator('.topbar .iconbtn').click();
+    // jetzt ist er bei neuen Bons automatisch dabei
+    await seedReceipt(page, { store: 'REWE', items: [item()] });
+    await expect(page.locator('.split-btns button')).toHaveCount(5);
   });
 });

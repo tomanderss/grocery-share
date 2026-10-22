@@ -123,6 +123,23 @@ export function rebalanceSplit(pcts, changedPid, value, personIds, locked = {}) 
   return out;
 }
 
+// Betrag EXAKT gleichmäßig auf alle Beteiligten — ohne Umweg über Prozente.
+// Nötig, weil evenSplit bei 3 Personen 34/33/33 liefert: 9,00 € würden darüber
+// zu 3,06/2,97/2,97 statt 3,00/3,00/3,00. "teilen" verspricht aber identische
+// Beträge, also wird hier direkt durch die Köpfe geteilt (Restcents
+// deterministisch an die vorderen Personen, Vorzeichen folgt dem Betrag).
+export function splitEvenly(amountCents, personIds) {
+  const total = Math.round(amountCents) || 0;
+  const n = personIds.length;
+  if (!n) return {};
+  const base = Math.trunc(total / n);
+  const rest = total - base * n;
+  const step = rest >= 0 ? 1 : -1;
+  const out = {};
+  personIds.forEach((pid, i) => { out[pid] = base + (i < Math.abs(rest) ? step : 0); });
+  return out;
+}
+
 // Cent-genaue Aufteilung eines Betrags nach Prozent-Split. Rundungs-Restcents
 // werden deterministisch in Personen-Reihenfolge verteilt (größter Rest zuerst,
 // bei Gleichstand frühere Person) — die Summe der Anteile ist IMMER der Betrag.
@@ -149,11 +166,43 @@ export function splitAmount(amountCents, split, personIds) {
   return out;
 }
 
+// ── Beteiligte eines Bons ────────────────────────────────────────────────────
+// Personen können als GAST geführt werden (`person.optional`). Gäste zählen nur
+// bei Bons mit, die sie ausdrücklich führen (`receipt.participantIds`) — sonst
+// würde ein einmal angelegter Gast jede spätere Abrechnung mit einer leeren
+// Spalte aufblähen. Ohne `participantIds` (Altbestand) gilt die feste Besetzung.
+export function receiptPersonIds(receipt, settings) {
+  const persons = settings?.persons || [];
+  const all = persons.map((p) => p.id);
+  if (!all.length) return [];
+  const listed = Array.isArray(receipt?.participantIds)
+    ? receipt.participantIds.filter((pid) => all.includes(pid))
+    : null;
+  // Reihenfolge immer aus den Einstellungen — die Restcent-Verteilung hängt daran.
+  if (listed && listed.length) return all.filter((pid) => listed.includes(pid));
+  const fixed = persons.filter((p) => !p.optional).map((p) => p.id);
+  return fixed.length ? fixed : all;
+}
+
+// Die feste Besetzung (alle Nicht-Gäste) — Startbesetzung jedes neuen Bons.
+export function defaultParticipantIds(settings) {
+  return receiptPersonIds(null, settings);
+}
+
+// Besetzung eines Bons ändern: gleichmäßig geteilte Positionen bleiben
+// gleichmäßig geteilt (jetzt über die neue Runde), alles andere wird nur auf
+// die neue Besetzung normalisiert — ein hinzukommender Gast startet dort bei 0 %.
+export function reassignSplits(items, oldIds, newIds) {
+  return (items || []).map((item) => ({
+    ...item,
+    split: isEvenSplit(item.split, oldIds) ? evenSplit(newIds) : normalizeSplit(item.split, newIds),
+  }));
+}
+
 // ── Effektive Position ────────────────────────────────────────────────────────
 // Wendet die Pfand-Zwangsregeln an: Pfand & Leergut → gleichmäßiger Split über
 // alle Personen + Pfand-Kategorie. Rückgabe-Beträge werden negativ gezwungen.
-export function effectiveItem(item, settings) {
-  const personIds = settings.persons.map((p) => p.id);
+export function effectiveItem(item, settings, personIds = defaultParticipantIds(settings)) {
   const isDeposit = item.kind === 'deposit' || item.kind === 'deposit_return';
   let priceCents = Math.round(item.priceCents) || 0;
   if (item.kind === 'deposit_return' && priceCents > 0) priceCents = -priceCents;
@@ -174,7 +223,7 @@ export function effectiveItem(item, settings) {
 // sharedPer ist für alle Personen identisch aufgeteilt (Restcent-Verteilung kann
 // um 1 Cent differieren — deterministisch).
 export function receiptSummary(receipt, settings) {
-  const personIds = settings.persons.map((p) => p.id);
+  const personIds = receiptPersonIds(receipt, settings);
   const byCat = new Map();
   settings.categories.forEach((c) => {
     byCat.set(c.id, {
@@ -198,15 +247,18 @@ export function receiptSummary(receipt, settings) {
   const personTotals = Object.fromEntries(personIds.map((pid) => [pid, 0]));
 
   (receipt.items || []).forEach((raw) => {
-    const item = effectiveItem(raw, settings);
+    const item = effectiveItem(raw, settings, personIds);
     const row = byCat.get(byCat.has(item.categoryId) ? item.categoryId : fallbackId);
     if (!row) return;
     grandTotal += item.priceCents;
     const name = String(item.name || '').trim();
     if (name && !row.itemNames.includes(name)) row.itemNames.push(name);
-    const shares = splitAmount(item.priceCents, item.split, personIds);
+    const even = isEvenSplit(item.split, personIds);
+    const shares = even
+      ? splitEvenly(item.priceCents, personIds)
+      : splitAmount(item.priceCents, item.split, personIds);
     personIds.forEach((pid) => { personTotals[pid] += shares[pid]; });
-    if (isEvenSplit(item.split, personIds)) {
+    if (even) {
       row.sharedTotal += item.priceCents;
       personIds.forEach((pid) => { row.sharedPer[pid] += shares[pid]; });
     } else {
@@ -221,13 +273,14 @@ export function receiptSummary(receipt, settings) {
   const sharedGrandPer = Object.fromEntries(
     personIds.map((pid) => [pid, rows.reduce((a, r) => a + r.sharedPer[pid], 0)])
   );
-  return { rows, personTotals, sharedGrandPer, grandTotal };
+  return { rows, personTotals, sharedGrandPer, grandTotal, personIds };
 }
 
 // Summe der Positionsbeträge (zur Plausibilitätsprüfung gegen den Bon-Gesamtbetrag).
 export function itemsTotal(receipt, settings) {
+  const personIds = receiptPersonIds(receipt, settings);
   return (receipt.items || []).reduce(
-    (a, raw) => a + effectiveItem(raw, settings).priceCents, 0
+    (a, raw) => a + effectiveItem(raw, settings, personIds).priceCents, 0
   );
 }
 
@@ -235,16 +288,58 @@ export function itemsTotal(receipt, settings) {
 // Aggregiert alle FINALEN Bons eines Monats ('YYYY-MM') zu derselben
 // Tabellenstruktur wie receiptSummary.
 export function monthSummary(receipts, settings, yearMonth) {
-  const merged = {
-    id: `month-${yearMonth}`,
-    items: [],
-  };
   const list = receipts.filter(
     (r) => r.status === 'final' && (r.date || '').startsWith(yearMonth)
   );
-  list.forEach((r) => { merged.items.push(...(r.items || [])); });
-  const summary = receiptSummary(merged, settings);
-  return { ...summary, receiptCount: list.length };
+  // Spalten = nur Personen, die diesen Monat auch wirklich beteiligt waren.
+  // Ein Gast, der einmal dabei war, taucht im Monat auf, in allen anderen nicht.
+  const order = (settings.persons || []).map((p) => p.id);
+  const involved = new Set();
+  list.forEach((r) => receiptPersonIds(r, settings).forEach((pid) => involved.add(pid)));
+  const seen = order.filter((pid) => involved.has(pid));
+  const personIds = seen.length ? seen : defaultParticipantIds(settings);
+
+  const zero = () => Object.fromEntries(personIds.map((pid) => [pid, 0]));
+  const byCat = new Map();
+  (settings.categories || []).forEach((c) => byCat.set(c.id, {
+    categoryId: c.id,
+    name: c.name,
+    sharedTotal: 0,
+    sharedPer: zero(),
+    single: zero(),
+    total: 0,
+    itemNames: [],
+  }));
+  const personTotals = zero();
+  let grandTotal = 0;
+
+  // JEDER Bon wird mit SEINER Besetzung ausgewertet und erst danach aufaddiert —
+  // sonst würde ein 50:50-Bon in einem Monat mit Gast fälschlich als "einzeln"
+  // gelten, weil der Gast dort 0 % hätte.
+  list.forEach((r) => {
+    const s = receiptSummary(r, settings);
+    grandTotal += s.grandTotal;
+    personIds.forEach((pid) => { personTotals[pid] += s.personTotals[pid] || 0; });
+    s.rows.forEach((row) => {
+      const target = byCat.get(row.categoryId);
+      if (!target) return;
+      target.sharedTotal += row.sharedTotal;
+      target.total += row.total;
+      personIds.forEach((pid) => {
+        target.sharedPer[pid] += row.sharedPer[pid] || 0;
+        target.single[pid] += row.single[pid] || 0;
+      });
+      row.itemNames.forEach((n) => { if (!target.itemNames.includes(n)) target.itemNames.push(n); });
+    });
+  });
+
+  const rows = [...byCat.values()].filter(
+    (r) => r.total !== 0 || r.sharedTotal !== 0 || personIds.some((pid) => r.single[pid] !== 0)
+  );
+  const sharedGrandPer = Object.fromEntries(
+    personIds.map((pid) => [pid, rows.reduce((a, r) => a + r.sharedPer[pid], 0)])
+  );
+  return { rows, personTotals, sharedGrandPer, grandTotal, personIds, receiptCount: list.length };
 }
 
 // Monatsschlüssel eines Bons ('YYYY-MM'); fällt auf createdAt zurück.
