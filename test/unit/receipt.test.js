@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   toCents, formatCents, evenSplit, isEvenSplit, normalizeSplit, proportionalSplit, rebalanceSplit,
   splitAmount, effectiveItem, receiptSummary, itemsTotal, monthSummary, receiptMonth,
-  receiptPersonIds, defaultParticipantIds, reassignSplits, splitEvenly,
+  receiptPersonIds, defaultParticipantIds, reassignSplits, splitEvenly, unbookedCount,
   grossCents, vatTotals, VAT_RATES,
 } from '../../js/receipt.js';
 
@@ -473,5 +473,15 @@ describe('Netto-Bons (MwSt. wird aufgeschlagen)', () => {
     assert.equal(itemsTotal(r, SETTINGS), 30); // 0,25 netto → 0,30 brutto
     const leergut = { netPrices: true, items: [item({ kind: 'deposit_return', priceCents: 25, vatRate: 19 })] };
     assert.equal(itemsTotal(leergut, SETTINGS), -30); // Vorzeichen vor der Steuer
+  });
+});
+
+describe('Eigene Buchhaltung (Merker)', () => {
+  test('unbookedCount zählt die noch nicht eingetragenen Bons', () => {
+    assert.equal(unbookedCount([{ booked: true }, { booked: false }, {}]), 2);
+    assert.equal(unbookedCount([{ booked: true }, { booked: true }]), 0);
+    assert.equal(unbookedCount([]), 0);
+    assert.equal(unbookedCount(null), 0);
+    assert.equal(unbookedCount([null, undefined]), 2); // defensiv: kaputte Einträge gelten als offen
   });
 });

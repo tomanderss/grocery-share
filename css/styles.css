@@ -304,3 +304,20 @@ label { display: flex; flex-direction: column; gap: 4px; font-size: .76rem; colo
 .mo-cost { font-weight: 800; font-size: .88rem; white-space: nowrap; }
 .credit-case { display: flex; flex-direction: column; gap: 8px; border-top: 1px dashed var(--grid); padding-top: 10px; }
 .credit-head .linkbtn { float: right; font-weight: 400; font-size: .82rem; }
+
+/* ── „Schon in meine Buchhaltung eingetragen?" ──────────────────────────────
+   Reiner Merker des Nutzers: ein schmaler Farbstreifen links an der Bon-Zeile
+   beantwortet die Frage auf einen Blick, der Haken rechts setzt sie um. */
+.receipt-row { padding-right: 8px; }
+.receipt-row.booked { border-left: 3px solid var(--good); }
+.receipt-row.unbooked { border-left: 3px solid var(--bad); }
+.rr-open { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0;
+  border: 0; background: none; padding: 0; cursor: pointer; text-align: left;
+  font-family: inherit; color: inherit; }
+.rr-book { flex: none; width: 30px; height: 30px; border-radius: 50%; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1.5px dashed var(--grid); background: transparent; color: var(--text3); }
+.rr-book.on { border: 1.5px solid var(--good); background: var(--good-soft); color: var(--good); }
+.section-note { float: right; text-transform: none; letter-spacing: 0; font-weight: 600; color: var(--bad); }
+.section-note.ok { color: var(--good); }
+.book-btn.on { border-color: var(--good); color: var(--good); background: var(--good-soft); }
