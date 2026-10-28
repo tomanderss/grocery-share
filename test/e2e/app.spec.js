@@ -79,7 +79,7 @@ test.describe('Bon-Workflow (manuell)', () => {
       ],
     });
     // Review: Rabatt-Chip + Regel-Begründung
-    await expect(page.locator('.chip-good', { hasText: 'Rabatt' })).toContainText('inkl. 0,10 € Rabatt');
+    await expect(page.locator('.chip-good', { hasText: 'Rabatt' })).toContainText('−0,10 € Rabatt');
     await expect(page.locator('.rule-hint')).toContainText('81 % nur Tom');
     await expect(page.locator('.rule-hint')).toContainText('erkannt als „Booster Drink“');
     // Auswertung: Sonstiges mit Artikelnamen in Klammern
@@ -152,7 +152,7 @@ test.describe('Bon-Workflow (manuell)', () => {
       store: 'REWE',
       items: [item({ name: 'PFAND', priceCents: 25, priceInput: '0,25', kind: 'deposit' })],
     });
-    await expect(page.locator('.item-card .chip-accent')).toContainText('immer gleichmäßig');
+    await expect(page.locator('.item-card .chip-accent')).toContainText('Pfand · gleichmäßig');
   });
 });
 
@@ -717,5 +717,61 @@ test.describe('Startseite & Verlauf', () => {
     // und der Zurück-Weg führt auf die Startseite
     await page.locator('.topbar .iconbtn').click();
     await page.waitForSelector('.screen.home');
+  });
+});
+
+test.describe('Positionskarte', () => {
+  const LANG = 'Alpenhain Bayerischer Obazda Classic Brotaufstrich 125g';
+
+  test('langer Artikelname ist vollständig lesbar statt abgeschnitten', async ({ page }) => {
+    await gotoApp(page);
+    await seedReceipt(page, { store: 'REWE', items: [item({ name: LANG, priceCents: 229, priceInput: '2,29' })] });
+    const name = page.locator('.item-name').first();
+    await expect(name).toHaveValue(LANG);
+    // Das Feld wächst auf die Texthöhe — nichts wird weggeschnitten
+    const fits = await name.evaluate((el) => el.scrollHeight <= el.clientHeight + 1);
+    expect(fits).toBe(true);
+    const lines = await name.evaluate((el) => el.clientHeight / parseFloat(getComputedStyle(el).lineHeight));
+    expect(lines).toBeGreaterThan(1); // bricht tatsächlich um
+  });
+
+  test('wächst beim Tippen mit und bleibt beim Kürzen kompakt', async ({ page }) => {
+    await gotoApp(page);
+    await seedReceipt(page, { store: 'REWE', items: [item({ name: 'Brot', priceCents: 300, priceInput: '3,00' })] });
+    const name = page.locator('.item-name').first();
+    const small = await name.evaluate((el) => el.clientHeight);
+    await name.fill(LANG);
+    const big = await name.evaluate((el) => el.clientHeight);
+    expect(big).toBeGreaterThan(small);
+    await name.fill('Brot');
+    expect(await name.evaluate((el) => el.clientHeight)).toBe(small);
+  });
+
+  test('eingefügte Zeilenumbrüche landen nicht im Namen', async ({ page }) => {
+    await gotoApp(page);
+    await seedReceipt(page, { store: 'REWE', items: [item({ name: 'Brot', priceCents: 300, priceInput: '3,00' })] });
+    const name = page.locator('.item-name').first();
+    await name.fill('Bio Vollmilch\n3,8% Fett');
+    await name.dispatchEvent('change');
+    await expect(name).toHaveValue('Bio Vollmilch 3,8% Fett');
+  });
+
+  test('Pfand sitzt in der Kategorie-Auswahl — eine Zeile weniger je Position', async ({ page }) => {
+    await gotoApp(page);
+    await seedReceipt(page, { store: 'REWE', items: [item({ name: 'Brot', priceCents: 300, priceInput: '3,00' })] });
+    // Unauffällige Position: gar keine Badge-Zeile
+    await expect(page.locator('.item-badges')).toHaveCount(0);
+
+    // Über die Kategorie zu Pfand wechseln
+    await page.locator('.cat-select').first().selectOption('__pfand');
+    expect(await page.evaluate(() => window.__gs.state.receipts[0].items[0].kind)).toBe('deposit');
+    await expect(page.locator('.item-card .chip-accent')).toContainText('Pfand');
+    await expect(page.locator('.split-btns')).toHaveCount(0); // Pfand wird immer geteilt
+
+    // und wieder zurück in eine echte Kategorie
+    await page.locator('.cat-select').first().selectOption('getraenke');
+    const it = await page.evaluate(() => window.__gs.state.receipts[0].items[0]);
+    expect([it.kind, it.categoryId]).toEqual(['normal', 'getraenke']);
+    await expect(page.locator('.split-btns')).toHaveCount(1);
   });
 });

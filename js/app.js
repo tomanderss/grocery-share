@@ -305,6 +305,13 @@ function discardChanges() {
   }
 }
 
+// Der Artikelname liegt in einem textarea (damit lange Namen umbrechen und
+// vollständig lesbar sind) — eingefügte Zeilenumbrüche fliegen wieder raus.
+function onNameInput(item) {
+  item.name = String(item.name || '').replace(/\s*\n+\s*/g, ' ').trim();
+  persistReceipts();
+}
+
 // Preis-Eingabe: die UI hält den Rohtext (priceInput), Cents werden daraus geparst.
 function onPriceInput(item) {
   item.priceCents = toCents(item.priceInput);
@@ -332,6 +339,28 @@ function setQuickSplit(item, mode) {
   item.needsReview = false;
   item.touched = true; // fließt beim nächsten Speichern ins Lernen ein
   persistReceipts();
+}
+
+// Wert der Kategorie-Auswahl, der „das ist Pfand" bedeutet (keine echte Kategorie).
+const DEPOSIT_PICK = '__pfand';
+
+function pickCategory(item, value) {
+  if (value === DEPOSIT_PICK) { setKind(item, 'deposit'); return; }
+  if (item.kind !== 'normal') setKind(item, 'normal');
+  item.categoryId = value;
+  item.touched = true;
+  persistReceipts();
+}
+
+// Hat die Position überhaupt etwas zu melden? Sonst entfällt die Badge-Zeile
+// komplett — das spart bei unauffälligen Positionen eine ganze Zeile.
+function hasBadges(item) {
+  return item.kind !== 'normal'
+    || splitMode(item) === 'custom'
+    || !!item.discountCents
+    || !!currentReceipt()?.netPrices
+    || !!item.fromRule
+    || !!item.needsReview;
 }
 
 function splitMode(item) {
@@ -1160,8 +1189,8 @@ const app = createApp({
       go: (screen) => { state.screen = screen; if (screen === 'chat') queueMicrotask(scrollChat); },
       addManualReceipt, onFilePicked, confirmAnalyze, openReceipt, deleteReceipt,
       openOriginals, openPdf,
-      addItem, removeItem, onPriceInput, onTotalInput, setQuickSplit, splitMode, splitLabel,
-      applySplitEditor, editorResult, onSplitSlider, toggleLock, setKind, finalizeReceipt, reopenReceipt, discardChanges,
+      addItem, removeItem, onPriceInput, onNameInput, onTotalInput, setQuickSplit, splitMode, splitLabel,
+      applySplitEditor, editorResult, onSplitSlider, toggleLock, setKind, pickCategory, hasBadges, DEPOSIT_PICK, finalizeReceipt, reopenReceipt, discardChanges,
       addPerson, removePerson, togglePersonFixed, toggleParticipant,
       toggleNetPrices, setVatRate, vatOptions, grossCents, vat,
       availableModels, refreshModels, modelForecast, modelForecastLabel,
@@ -1314,24 +1343,31 @@ const app = createApp({
       <div class="item-list">
         <div v-for="item in receipt.items" :key="item.id" class="card item-card" :class="{ review: item.needsReview, deposit: item.kind !== 'normal' }">
           <div class="item-top">
-            <input class="item-name" v-model="item.name" @change="persistReceipts" placeholder="Artikel">
+            <textarea class="item-name" rows="1" v-autogrow v-model="item.name" placeholder="Artikel"
+                      @keydown.enter.prevent @change="onNameInput(item)"></textarea>
             <input class="item-price" inputmode="decimal" v-model="item.priceInput" @change="onPriceInput(item)" placeholder="0,00">
-            <button class="iconbtn small" @click="removeItem(item)" v-html="ic('trash', 18)" aria-label="Position löschen"></button>
+            <button class="iconbtn tiny" @click="removeItem(item)" v-html="ic('trash', 16)" aria-label="Position löschen"></button>
           </div>
-          <div class="item-controls" v-if="item.kind === 'normal'">
-            <select class="cat-select" v-model="item.categoryId" @change="item.touched = true; persistReceipts()">
+          <div class="item-controls">
+            <!-- Pfand steckt mit in der Kategorie-Auswahl: eine Zeile weniger je
+                 Position, und die Zuordnung liegt dort, wo man sie sucht. -->
+            <select class="cat-select" :value="item.kind === 'normal' ? item.categoryId : DEPOSIT_PICK"
+                    @change="pickCategory(item, $event.target.value)">
               <option v-for="c in state.settings.categories" :key="c.id" :value="c.id">{{ c.name }}</option>
+              <option :value="DEPOSIT_PICK">Pfand / Leergut</option>
             </select>
-            <div class="split-btns">
+            <div class="split-btns" v-if="item.kind === 'normal'">
               <button v-for="pid in activePids()" :key="pid" :class="{ active: splitMode(item) === pid }" @click="setQuickSplit(item, pid)">{{ personName(pid) }}</button>
               <button :class="{ active: splitMode(item) === 'shared' }" @click="setQuickSplit(item, 'shared')">{{ activePids().length === 2 ? '50:50' : 'teilen' }}</button>
               <button :class="{ active: splitMode(item) === 'custom' }" @click="setQuickSplit(item, 'custom')">%</button>
             </div>
           </div>
-          <div class="item-badges">
-            <span v-if="item.kind !== 'normal'" class="chip chip-accent">{{ kindLabel(item.kind) }} — immer gleichmäßig auf alle geteilt, Kategorie {{ categoryName(state.settings.depositCategoryId) }}</span>
-            <span v-else class="chip">{{ splitLabel(item) }}</span>
-            <span v-if="item.discountCents" class="chip chip-good">inkl. {{ fmt(item.discountCents) }} Rabatt</span>
+          <div class="item-badges" v-if="hasBadges(item)">
+            <span v-if="item.kind !== 'normal'" class="chip chip-accent">{{ kindLabel(item.kind) }} · gleichmäßig · {{ categoryName(state.settings.depositCategoryId) }}</span>
+            <!-- Bei den Schnellwahl-Knöpfen sieht man die Aufteilung schon; nur die
+                 freie Prozent-Verteilung braucht noch eine eigene Beschriftung. -->
+            <span v-else-if="splitMode(item) === 'custom'" class="chip">{{ splitLabel(item) }}</span>
+            <span v-if="item.discountCents" class="chip chip-good">−{{ fmt(item.discountCents) }} Rabatt</span>
             <template v-if="receipt.netPrices">
               <span class="chip" :class="item.vatRate ? 'chip-accent' : 'chip-warn'">
                 <select class="vat-pick" :value="item.vatRate || 0" @change="setVatRate(item, $event.target.value)">
@@ -1341,10 +1377,8 @@ const app = createApp({
               </span>
               <span class="chip chip-good">netto {{ fmt(item.priceCents) }} → brutto {{ fmt(grossCents(item.priceCents, item.vatRate)) }}</span>
             </template>
-            <span v-if="item.fromRule" class="chip chip-good" title="Aus gelernter Regel">gelernt ✓</span>
-            <span v-if="item.needsReview" class="chip chip-warn">Zuordnung prüfen</span>
-            <button class="chip chip-btn" v-if="item.kind === 'normal'" @click="setKind(item, 'deposit')">als Pfand</button>
-            <button class="chip chip-btn" v-else @click="setKind(item, 'normal')">kein Pfand</button>
+            <span v-if="item.fromRule" class="chip chip-good" title="Aus gelernter Regel">gelernt</span>
+            <span v-if="item.needsReview" class="chip chip-warn">prüfen</span>
           </div>
           <div v-if="item.ruleInfo" class="rule-hint">
             <span v-html="ic('bulb', 14)"></span>
@@ -1716,6 +1750,38 @@ const app = createApp({
     <div v-if="state.toast" class="toast" :class="state.toast.kind">{{ state.toast.text }}</div>
   </div>
   `,
+});
+
+// Artikelnamen stehen in einem textarea, damit lange Namen umbrechen statt
+// abgeschnitten zu werden — die Höhe folgt dem Inhalt.
+function fitToContent(el) {
+  el.style.height = 'auto';
+  // scrollHeight enthält Inhalt + Padding, aber NICHT den Rahmen — bei
+  // box-sizing: border-box fehlen sonst genau diese Pixel und die letzte Zeile
+  // wird minimal angeschnitten.
+  const cs = getComputedStyle(el);
+  const border = parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth);
+  el.style.height = `${el.scrollHeight + border}px`;
+}
+app.directive('autogrow', {
+  mounted(el) {
+    const refit = () => fitToContent(el);
+    refit();
+    // Beim Einhängen steht der Wert von v-model noch nicht zwingend im DOM und
+    // die Schrift ist evtl. noch nicht geladen — nach dem ersten Layout nachmessen.
+    requestAnimationFrame(refit);
+    el.addEventListener('input', refit);
+    // Ändert sich die Breite (Drehen, Tastatur), bricht der Text neu um.
+    let lastWidth = el.clientWidth;
+    el._autogrowRO = new ResizeObserver(() => {
+      if (el.clientWidth === lastWidth) return; // Höhenänderung ist unsere eigene
+      lastWidth = el.clientWidth;
+      refit();
+    });
+    el._autogrowRO.observe(el);
+  },
+  updated(el) { fitToContent(el); },
+  unmounted(el) { el._autogrowRO?.disconnect(); },
 });
 
 applyTheme();
