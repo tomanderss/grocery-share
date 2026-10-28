@@ -1,0 +1,3 @@
+Positionskarten überarbeitet: lange Artikelnamen werden jetzt umgebrochen und sind komplett lesbar statt nach drei Wörtern abgeschnitten
+Deutlich kompakteres UI — schlankere Karten, kleinere Kategorie-Auswahl, weniger Rahmen und Abstände: es passen rund ein Drittel mehr Positionen auf den Bildschirm
+Pfand wird jetzt direkt in der Kategorie-Auswahl gesetzt, und die Hinweis-Zeile erscheint nur noch, wenn es an der Position wirklich etwas zu sehen gibt
