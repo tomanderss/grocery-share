@@ -1,8 +1,17 @@
 // Auto-generiert von build.js — nicht manuell bearbeiten!
-export const BUILD      = '0.21';
-export const BUILD_HASH = '2ad85a0';
+export const BUILD      = '0.22';
+export const BUILD_HASH = 'be60416';
 
 export const CHANGELOG = [
+  {
+    "version": "0.22",
+    "date": "28.10.2026",
+    "changes": [
+      "Positionskarten überarbeitet: lange Artikelnamen werden jetzt umgebrochen und sind komplett lesbar statt nach drei Wörtern abgeschnitten",
+      "Deutlich kompakteres UI — schlankere Karten, kleinere Kategorie-Auswahl, weniger Rahmen und Abstände: es passen rund ein Drittel mehr Positionen auf den Bildschirm",
+      "Pfand wird jetzt direkt in der Kategorie-Auswahl gesetzt, und die Hinweis-Zeile erscheint nur noch, wenn es an der Position wirklich etwas zu sehen gibt"
+    ]
+  },
   {
     "version": "0.21",
     "date": "22.10.2026",
