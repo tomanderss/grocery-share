@@ -4,6 +4,7 @@ import {
   toCents, formatCents, evenSplit, isEvenSplit, normalizeSplit, proportionalSplit, rebalanceSplit,
   splitAmount, effectiveItem, receiptSummary, itemsTotal, monthSummary, receiptMonth,
   receiptPersonIds, defaultParticipantIds, reassignSplits, splitEvenly, unbookedCount,
+  payerId, paidTotals,
   grossCents, vatTotals, VAT_RATES,
 } from '../../js/receipt.js';
 
@@ -483,5 +484,53 @@ describe('Eigene Buchhaltung (Merker)', () => {
     assert.equal(unbookedCount([]), 0);
     assert.equal(unbookedCount(null), 0);
     assert.equal(unbookedCount([null, undefined]), 2); // defensiv: kaputte Einträge gelten als offen
+  });
+});
+
+describe('Wer hat bezahlt (reine Information)', () => {
+  test('payerId: Standard ist die erste Person', () => {
+    assert.equal(payerId({}, SETTINGS), 'p1');
+    assert.equal(payerId(null, SETTINGS), 'p1');
+  });
+
+  test('payerId nimmt den gesetzten Zahler', () => {
+    assert.equal(payerId({ paidBy: 'p2' }, SETTINGS), 'p2');
+  });
+
+  test('payerId fällt bei gelöschter Person auf die erste zurück', () => {
+    assert.equal(payerId({ paidBy: 'p9' }, SETTINGS), 'p1');
+  });
+
+  test('payerId ohne Personen ist null', () => {
+    assert.equal(payerId({ paidBy: 'p1' }, { persons: [] }), null);
+  });
+
+  test('der Zahler ändert die Aufteilung NICHT', () => {
+    const base = { items: [item({ priceCents: 1000, split: { p1: 50, p2: 50 } })] };
+    const a = receiptSummary({ ...base, paidBy: 'p1' }, SETTINGS);
+    const b = receiptSummary({ ...base, paidBy: 'p2' }, SETTINGS);
+    assert.deepEqual(a.personTotals, b.personTotals);
+    assert.deepEqual(a.personTotals, { p1: 500, p2: 500 });
+  });
+
+  test('paidTotals summiert, wer wie viel ausgelegt hat', () => {
+    const totals = paidTotals([
+      { paidBy: 'p1', totalCents: 1000, items: [] },
+      { paidBy: 'p2', totalCents: 2500, items: [] },
+      { totalCents: 500, items: [] }, // ohne Angabe → Standard p1
+    ], SETTINGS);
+    assert.deepEqual(totals, { p1: 1500, p2: 2500 });
+  });
+
+  test('paidTotals nimmt ohne Bon-Summe die Positionen', () => {
+    const totals = paidTotals([
+      { paidBy: 'p2', items: [item({ priceCents: 349 }), item({ id: 'i2', priceCents: 151 })] },
+    ], SETTINGS);
+    assert.deepEqual(totals, { p1: 0, p2: 500 });
+  });
+
+  test('paidTotals ist mit leerer Liste neutral', () => {
+    assert.deepEqual(paidTotals([], SETTINGS), { p1: 0, p2: 0 });
+    assert.deepEqual(paidTotals(null, SETTINGS), { p1: 0, p2: 0 });
   });
 });

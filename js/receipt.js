@@ -385,6 +385,29 @@ export function unbookedCount(receipts) {
   return (receipts || []).filter((r) => !r?.booked).length;
 }
 
+// Wer den Bon bezahlt hat (`receipt.paidBy`) — reine Zusatzinformation für die
+// eigene Abrechnung. Sie fließt in KEINE Aufteilung ein: wer zahlt, hat damit
+// nichts zu tun, wem die Positionen zugeordnet werden. Standard ist die erste
+// Person aus den Einstellungen; eine gelöschte Person fällt darauf zurück.
+export function payerId(receipt, settings) {
+  const all = (settings?.persons || []).map((p) => p.id);
+  if (!all.length) return null;
+  return all.includes(receipt?.paidBy) ? receipt.paidBy : all[0];
+}
+
+// Wie viel jede Person ausgelegt hat (Bon-Summe, nicht ihr Anteil) — damit sich
+// „wer liegt wie weit vorne" ohne Taschenrechner ablesen lässt.
+export function paidTotals(receipts, settings) {
+  const totals = {};
+  for (const pid of (settings?.persons || []).map((p) => p.id)) totals[pid] = 0;
+  for (const r of receipts || []) {
+    const pid = payerId(r, settings);
+    if (pid == null) continue;
+    totals[pid] = (totals[pid] || 0) + (r.totalCents || itemsTotal(r, settings));
+  }
+  return totals;
+}
+
 // Monatsschlüssel eines Bons ('YYYY-MM'); fällt auf createdAt zurück.
 export function receiptMonth(receipt) {
   if (/^\d{4}-\d{2}/.test(receipt.date || '')) return receipt.date.slice(0, 7);
