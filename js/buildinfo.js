@@ -1,8 +1,16 @@
 // Auto-generiert von build.js — nicht manuell bearbeiten!
-export const BUILD      = '0.22';
-export const BUILD_HASH = 'be60416';
+export const BUILD      = '0.23';
+export const BUILD_HASH = '89b5223';
 
 export const CHANGELOG = [
+  {
+    "version": "0.23",
+    "date": "02.11.2026",
+    "changes": [
+      "Neuer Merker „schon eingetragen\": mit einem Tipp auf den Haken rechts an der Bon-Zeile hakst du ab, dass du den Bon in dein eigenes Ausgaben-System übertragen hast — auch nachträglich und ohne den Bon zu öffnen",
+      "Bon-Listen zeigen den Stand auf einen Blick: grüner Streifen = eingetragen, roter Streifen = steht noch aus; auf der Startseite steht dazu, wie viele noch offen sind"
+    ]
+  },
   {
     "version": "0.22",
     "date": "28.10.2026",
