@@ -1,1 +1,0 @@
-- Behoben: Zwischen der letzten Bon-Zeile und „Ganzer Verlauf" auf der Startseite fehlte der Abstand.
