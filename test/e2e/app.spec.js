@@ -696,6 +696,14 @@ test.describe('Startseite & Verlauf', () => {
     await expect(page.locator('.screen.home .btn', { hasText: 'Ganzer Verlauf' })).toContainText('8 Bons');
   });
 
+  test('zwischen letzter Bon-Zeile und Verlaufs-Button bleibt Abstand', async ({ page }) => {
+    await gotoApp(page);
+    await seedMany(page, 8);
+    const last = await page.locator('.screen.home .receipt-row').last().boundingBox();
+    const btn = await page.locator('.screen.home .btn', { hasText: 'Ganzer Verlauf' }).boundingBox();
+    expect(btn.y - (last.y + last.height)).toBeGreaterThanOrEqual(8);
+  });
+
   test('bei wenigen Bons gibt es keinen Verlaufs-Button', async ({ page }) => {
     await gotoApp(page);
     await seedMany(page, 3);
