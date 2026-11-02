@@ -1,8 +1,15 @@
 // Auto-generiert von build.js — nicht manuell bearbeiten!
-export const BUILD      = '0.23';
-export const BUILD_HASH = '89b5223';
+export const BUILD      = '0.24';
+export const BUILD_HASH = '610fad4';
 
 export const CHANGELOG = [
+  {
+    "version": "0.24",
+    "date": "02.11.2026",
+    "changes": [
+      "- Neu: je Bon lässt sich festhalten, wer bezahlt hat (Standard Tom) — als Chip in den Bon-Listen, in der Auswertung und als „Ausgelegt\"-Zeile in der Monatsübersicht. Reine Information, die Aufteilung bleibt unberührt."
+    ]
+  },
   {
     "version": "0.23",
     "date": "02.11.2026",
