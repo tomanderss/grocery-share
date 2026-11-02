@@ -111,7 +111,10 @@ label { display: flex; flex-direction: column; gap: 4px; font-size: .76rem; colo
 .receipt-row { display: flex; align-items: center; gap: 12px; width: 100%; border: 0; cursor: pointer; text-align: left;
   font-family: inherit; color: var(--text); }
 .rr-main { flex: 1; min-width: 0; }
-.rr-store { font-weight: 800; font-size: .98rem; display: flex; align-items: center; gap: 8px; }
+.rr-store { font-weight: 800; font-size: .98rem; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* Zahler-Chip: reine Information, deshalb bewusst leise — der Bon-Name führt. */
+.chip-payer { flex: none; background: var(--grid); color: var(--text3); font-weight: 600; }
+.chip-payer svg { opacity: .75; }
 .rr-date { color: var(--text3); font-size: .8rem; margin-top: 2px; }
 .rr-total { font-weight: 800; font-variant-numeric: tabular-nums; }
 
@@ -178,6 +181,13 @@ label { display: flex; flex-direction: column; gap: 4px; font-size: .76rem; colo
 .sum-total { font-weight: 800; font-size: 1.08rem; font-variant-numeric: tabular-nums; }
 .sum-api, .rr-api { color: var(--text3); font-size: .78rem; }
 .sum-api { margin-top: 3px; }
+.sum-payer { display: flex; align-items: center; gap: 5px; color: var(--text2); font-size: .8rem; margin-top: 3px; }
+.sum-payer svg { opacity: .7; }
+/* „Ausgelegt" unter der Monatstabelle — wer wie viel vorgestreckt hat. */
+.paid-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 12px;
+  padding-top: 10px; border-top: 1px solid var(--grid); color: var(--text2); font-size: .82rem; }
+.paid-row svg { opacity: .7; }
+.paid-one { font-variant-numeric: tabular-nums; }
 .table-scroll { overflow-x: auto; } /* bei vielen Personen scrollt die Tabelle horizontal */
 .sum-table { width: 100%; border-collapse: collapse; font-size: .84rem; }
 .sum-table th { text-align: right; color: var(--text3); font-size: .7rem; text-transform: uppercase; letter-spacing: .4px; padding: 5px 4px; }

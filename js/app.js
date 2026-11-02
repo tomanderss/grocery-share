@@ -13,7 +13,7 @@ import {
 import {
   formatCents, toCents, evenSplit, normalizeSplit, isEvenSplit, proportionalSplit, rebalanceSplit,
   receiptSummary, monthSummary, itemsTotal, receiptMonth,
-  receiptPersonIds, defaultParticipantIds, reassignSplits, unbookedCount,
+  receiptPersonIds, defaultParticipantIds, reassignSplits, unbookedCount, payerId, paidTotals,
   VAT_RATES, grossCents, vatTotals,
 } from './receipt.js';
 import {
@@ -151,7 +151,7 @@ function currentReceipt() {
   return state.receipts.find((r) => r.id === state.currentId) || null;
 }
 
-function newDraft({ store = '', date = '', totalCents = 0, items = [], notes = '', apiCost = null, participantIds = null, netPrices = false } = {}) {
+function newDraft({ store = '', date = '', totalCents = 0, items = [], notes = '', apiCost = null, participantIds = null, netPrices = false, paidBy = null } = {}) {
   const r = {
     id: newId('bon'),
     store,
@@ -165,6 +165,8 @@ function newDraft({ store = '', date = '', totalCents = 0, items = [], notes = '
     participantIds: participantIds || defaultParticipantIds(state.settings),
     // Netto-Bon (Großhandel): priceCents sind NETTO, vatRate je Position schlägt auf.
     netPrices,
+    // Wer ausgelegt hat — reine Information, ändert nichts an der Aufteilung.
+    paidBy: paidBy || payerId(null, state.settings),
     items,
   };
   state.receipts.unshift(r);
@@ -235,6 +237,32 @@ function bookedLabel(r) {
   if (!r?.booked) return 'Noch nicht eingetragen — tippen zum Abhaken';
   const at = r.bookedAt ? new Date(r.bookedAt).toISOString().slice(0, 10) : '';
   return at ? `Eingetragen am ${formatDate(at)} — tippen zum Zurücknehmen` : 'Eingetragen — tippen zum Zurücknehmen';
+}
+
+// ── Wer hat bezahlt ─────────────────────────────────────────────────────────
+// Ebenfalls rein informativ: die Aufteilung bleibt davon völlig unberührt,
+// der Nutzer sieht nur, wer den Einkauf ausgelegt hat.
+function payerOf(r) {
+  return payerId(r, state.settings);
+}
+
+function payerName(r) {
+  return personName(payerOf(r));
+}
+
+function setPayer(r, pid) {
+  if (!r || r.paidBy === pid) return;
+  r.paidBy = pid;
+  persistReceipts();
+  log('bon', 'payer set');
+}
+
+// „Ausgelegt" je Person über eine Bon-Liste — nur als Info unter der Auswertung.
+function paidRows(receipts) {
+  const totals = paidTotals(receipts, state.settings);
+  return personIds()
+    .filter((pid) => totals[pid])
+    .map((pid) => ({ pid, name: personName(pid), cents: totals[pid] }));
 }
 
 function openReceipt(r) {
@@ -1179,6 +1207,9 @@ const app = createApp({
     const vat = computed(() => (receipt.value ? vatTotals(receipt.value, state.settings) : null));
     const month = computed(() => monthFor(state.monthKey));
     const monthReceipts = computed(() => receiptsOfMonth(state.monthKey));
+    // Wer im Monat wie viel ausgelegt hat — nur die abgeschlossenen Bons, damit
+    // es zur Tabelle darüber passt. Reine Information, keine Verrechnung.
+    const monthPaid = computed(() => paidRows(monthReceipts.value.filter((r) => r.status === 'final')));
     const totalsDiff = computed(() => {
       const r = receipt.value;
       if (!r || !r.totalCents) return 0;
@@ -1196,7 +1227,7 @@ const app = createApp({
     return {
       state,
       models: CLAUDE_MODELS,
-      receipt, summary, month, monthReceipts, totalsDiff, reviewCount, sortedRules,
+      receipt, summary, month, monthReceipts, monthPaid, totalsDiff, reviewCount, sortedRules,
       creditLeft, bonsLeft, apiCost,
       ic: (name, size) => icon(name, { size }),
       fmt, personName, categoryName, formatDate, monthLabel, formatCost, formatUsd, totalApiCostUsd,
@@ -1215,6 +1246,7 @@ const app = createApp({
       activePids, guestPersons,
       summaryFor, copySummary, summaryToTSV, shiftMonth,
       toggleBooked, bookedLabel, unbookedCount,
+      payerOf, payerName, setPayer,
       sendChat, toggleVoice,
       persistSettings, persistReceipts, applyTheme,
       addCategory, removeCategory, deleteRule,
@@ -1292,7 +1324,7 @@ const app = createApp({
         <div v-for="r in state.receipts.slice(0, HOME_RECEIPTS)" :key="r.id" class="receipt-row card" :class="r.booked ? 'booked' : 'unbooked'">
           <button class="rr-open" @click="openReceipt(r)">
             <div class="rr-main">
-              <div class="rr-store">{{ r.store || 'Ohne Namen' }} <span v-if="r.status === 'draft'" class="chip chip-warn">Entwurf</span></div>
+              <div class="rr-store">{{ r.store || 'Ohne Namen' }} <span v-if="r.status === 'draft'" class="chip chip-warn">Entwurf</span><span class="chip chip-payer" :title="'Bezahlt von ' + payerName(r)"><span v-html="ic('wallet', 12)"></span>{{ payerName(r) }}</span></div>
               <div class="rr-date">{{ formatDate(r.date) }} · {{ r.items.length }} Positionen<span v-if="r.apiCost" class="rr-api"> · KI {{ apiCost(r.apiCost.usd) }}</span></div>
             </div>
             <div class="rr-total">{{ fmt(r.totalCents || summaryFor(r).grandTotal) }}</div>
@@ -1317,7 +1349,7 @@ const app = createApp({
         <div v-for="r in state.receipts" :key="r.id" class="receipt-row card" :class="r.booked ? 'booked' : 'unbooked'">
           <button class="rr-open" @click="openReceipt(r)">
             <div class="rr-main">
-              <div class="rr-store">{{ r.store || 'Ohne Namen' }} <span v-if="r.status === 'draft'" class="chip chip-warn">Entwurf</span></div>
+              <div class="rr-store">{{ r.store || 'Ohne Namen' }} <span v-if="r.status === 'draft'" class="chip chip-warn">Entwurf</span><span class="chip chip-payer" :title="'Bezahlt von ' + payerName(r)"><span v-html="ic('wallet', 12)"></span>{{ payerName(r) }}</span></div>
               <div class="rr-date">{{ formatDate(r.date) }} · {{ r.items.length }} Positionen<span v-if="r.apiCost" class="rr-api"> · KI {{ apiCost(r.apiCost.usd) }}</span></div>
             </div>
             <div class="rr-total">{{ fmt(r.totalCents || summaryFor(r).grandTotal) }}</div>
@@ -1355,7 +1387,12 @@ const app = createApp({
             Netto {{ fmt(vat.netCents) }} · MwSt. {{ fmt(vat.vatCents) }} · Brutto {{ fmt(vat.grossCents) }}
           </span>
         </div>
-        <div v-if="guestPersons().length" class="who-row">
+        <div class="who-row payer-row">
+          <span class="who-label">Bezahlt:</span>
+          <button v-for="p in state.settings.persons" :key="p.id" class="chip chip-btn"
+                  :class="{ active: payerOf(receipt) === p.id }" @click="setPayer(receipt, p.id)">{{ p.name }}</button>
+        </div>
+        <div v-if="guestPersons().length" class="who-row guest-row">
           <span class="who-label">Dabei:</span>
           <button v-for="p in state.settings.persons" :key="p.id" class="chip chip-btn"
                   :class="{ active: activePids().includes(p.id), fixed: !p.optional }"
@@ -1439,6 +1476,7 @@ const app = createApp({
           <div>
             <div class="sum-store">{{ receipt.store || 'Ohne Namen' }}</div>
             <div class="sum-date">{{ formatDate(receipt.date) }} · {{ receipt.items.length }} Positionen</div>
+            <div class="sum-payer"><span v-html="ic('wallet', 14)"></span> Bezahlt von {{ payerName(receipt) }}</div>
             <div v-if="receipt.apiCost" class="sum-api">KI-Analyse: {{ apiCost(receipt.apiCost.usd) }} <span class="mut">({{ (receipt.apiCost.inputTokens + receipt.apiCost.outputTokens).toLocaleString('de-DE') }} Tokens)</span></div>
           </div>
           <div class="sum-total">{{ fmt(summary.grandTotal) }}</div>
@@ -1511,6 +1549,11 @@ const app = createApp({
           </tbody>
           <tfoot><tr><td>Gesamt pro Person</td><td v-for="pid in month.personIds" :key="pid" class="num strong">{{ fmt(month.personTotals[pid]) }}</td></tr></tfoot>
         </table></div>
+        <div v-if="monthPaid.length" class="paid-row">
+          <span v-html="ic('wallet', 14)"></span>
+          <span>Ausgelegt:</span>
+          <span v-for="p in monthPaid" :key="p.pid" class="paid-one">{{ p.name }} <strong>{{ fmt(p.cents) }}</strong></span>
+        </div>
         <div class="sum-actions">
           <button class="btn btn-ghost" @click="copySummary(month, 'Monat ' + monthLabel(state.monthKey))"><span v-html="ic('copy', 18)"></span> Tabelle kopieren</button>
         </div>
@@ -1522,7 +1565,7 @@ const app = createApp({
         <div v-for="r in monthReceipts" :key="r.id" class="receipt-row card" :class="r.booked ? 'booked' : 'unbooked'">
           <button class="rr-open" @click="openReceipt(r)">
             <div class="rr-main">
-              <div class="rr-store">{{ r.store || 'Ohne Namen' }} <span v-if="r.status === 'draft'" class="chip chip-warn">Entwurf</span></div>
+              <div class="rr-store">{{ r.store || 'Ohne Namen' }} <span v-if="r.status === 'draft'" class="chip chip-warn">Entwurf</span><span class="chip chip-payer" :title="'Bezahlt von ' + payerName(r)"><span v-html="ic('wallet', 12)"></span>{{ payerName(r) }}</span></div>
               <div class="rr-date">{{ formatDate(r.date) }}<span v-if="r.apiCost" class="rr-api"> · KI {{ apiCost(r.apiCost.usd) }}</span></div>
             </div>
             <div class="rr-total">{{ fmt(r.totalCents || summaryFor(r).grandTotal) }}</div>

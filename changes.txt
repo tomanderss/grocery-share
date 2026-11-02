@@ -1,0 +1,1 @@
+- Neu: je Bon lässt sich festhalten, wer bezahlt hat (Standard Tom) — als Chip in den Bon-Listen, in der Auswertung und als „Ausgelegt"-Zeile in der Monatsübersicht. Reine Information, die Aufteilung bleibt unberührt.

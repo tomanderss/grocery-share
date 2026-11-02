@@ -467,7 +467,7 @@ test.describe('Gäste', () => {
 
     await seedReceipt(page, { store: 'REWE', items: [item({ priceCents: 900, priceInput: '9,00' })] });
     // Review zeigt die Dabei-Zeile; Tjure ist noch draußen
-    await expect(page.locator('.who-row:not(.price-mode)')).toContainText('Tjure');
+    await expect(page.locator('.who-row.guest-row')).toContainText('Tjure');
     await expect(page.locator('.split-btns button')).toHaveCount(4); // Tom, Tara, teilen, %
 
     // Auswertung: nur zwei Personen-Spalten, keine leere Gast-Spalte
@@ -482,7 +482,7 @@ test.describe('Gäste', () => {
     await addGuest(page);
     await seedReceipt(page, { store: 'REWE', items: [item({ priceCents: 900, priceInput: '9,00' })] });
 
-    await page.locator('.who-row:not(.price-mode) .chip-btn', { hasText: 'Tjure' }).click();
+    await page.locator('.who-row.guest-row .chip-btn', { hasText: 'Tjure' }).click();
     // 900 ct geteilt durch drei
     await expect(page.locator('.split-btns button')).toHaveCount(5);
     const split = await page.evaluate(() => window.__gs.state.receipts[0].items[0].split);
@@ -512,7 +512,7 @@ test.describe('Gäste', () => {
     // Zweiter Bon MIT Gast im selben Monat
     await page.locator('.topbar .iconbtn').click();
     await seedReceipt(page, { store: 'B', items: [item({ priceCents: 900, priceInput: '9,00' })] });
-    await page.locator('.who-row:not(.price-mode) .chip-btn', { hasText: 'Tjure' }).click();
+    await page.locator('.who-row.guest-row .chip-btn', { hasText: 'Tjure' }).click();
     await page.locator('.review-actions .btn-primary').click();
     await page.waitForSelector('.screen.summary');
     await page.locator('.screen.summary .btn-primary').click();
@@ -863,3 +863,69 @@ test.describe('Eingetragen-Merker', () => {
     await expect(page.locator('.section-note')).toHaveClass(/ok/);
   });
 });
+
+test.describe('Wer hat bezahlt', () => {
+  test('Standard ist Tom und steht als Chip in der Bon-Zeile', async ({ page }) => {
+    await gotoApp(page);
+    await page.evaluate(() => {
+      const d = window.__gs.newDraft({ store: 'REWE', totalCents: 1000 });
+      d.status = 'final';
+      window.__gs.state.currentId = null;
+      window.__gs.state.screen = 'home';
+    });
+    await page.waitForSelector('.receipt-row');
+    expect(await page.evaluate(() => window.__gs.state.receipts[0].paidBy)).toBe('p1');
+    await expect(page.locator('.receipt-row .chip-payer')).toHaveText('Tom');
+  });
+
+  test('Zahler umstellen ändert die Aufteilung nicht', async ({ page }) => {
+    await gotoApp(page);
+    await seedReceipt(page, {
+      store: 'REWE',
+      items: [item({ name: 'Milch', priceCents: 900, priceInput: '9,00' })],
+    });
+    const row = page.locator('.who-row.payer-row');
+    await expect(row.locator('.chip-btn.active')).toHaveText('Tom');
+
+    await page.locator('.review-actions .btn-primary').click();
+    await page.waitForSelector('.screen.summary');
+    const before = await page.evaluate(() => window.__gs.state.receipts[0].items[0].split);
+    const totals = await page.locator('.sum-table tfoot td.num').allInnerTexts();
+    await expect(page.locator('.sum-payer')).toContainText('Bezahlt von Tom');
+
+    // zurück ins Review, Zahler auf Tara
+    await page.evaluate(() => { window.__gs.state.screen = 'review'; });
+    await page.waitForSelector('.screen.review');
+    await row.locator('.chip-btn', { hasText: 'Tara' }).click();
+    await expect(row.locator('.chip-btn.active')).toHaveText('Tara');
+    expect(await page.evaluate(() => window.__gs.state.receipts[0].paidBy)).toBe('p2');
+
+    // Split und Auswertung bleiben identisch — der Zahler ist nur Information
+    expect(await page.evaluate(() => window.__gs.state.receipts[0].items[0].split)).toEqual(before);
+    await page.evaluate(() => { window.__gs.state.screen = 'summary'; });
+    await page.waitForSelector('.screen.summary');
+    expect(await page.locator('.sum-table tfoot td.num').allInnerTexts()).toEqual(totals);
+    await expect(page.locator('.sum-payer')).toContainText('Bezahlt von Tara');
+  });
+
+  test('Monatsübersicht zeigt, wer wie viel ausgelegt hat', async ({ page }) => {
+    await gotoApp(page);
+    await page.evaluate(() => {
+      const mk = (store, cents, paidBy) => {
+        const d = window.__gs.newDraft({ store, totalCents: cents, paidBy });
+        d.status = 'final';
+        d.date = new Date().toISOString().slice(0, 10);
+      };
+      mk('REWE', 1000, 'p1');
+      mk('EDEKA', 2500, 'p2');
+      mk('ALDI', 500, 'p1');
+      window.__gs.state.currentId = null;
+      window.__gs.state.screen = 'month';
+    });
+    await page.waitForSelector('.screen.month');
+    const paid = page.locator('.paid-row');
+    await expect(paid).toContainText('Tom 15,00 €');
+    await expect(paid).toContainText('Tara 25,00 €');
+  });
+});
+
