@@ -378,6 +378,13 @@ export function monthSummary(receipts, settings, yearMonth) {
   return { rows, personTotals, sharedGrandPer, grandTotal, personIds, receiptCount: list.length };
 }
 
+// ── Eigene Buchhaltung ───────────────────────────────────────────────────────
+// `receipt.booked` merkt sich, ob der Bon schon im separaten Ausgaben-System
+// des Nutzers gelandet ist — rein ein Merker, der nichts berechnet.
+export function unbookedCount(receipts) {
+  return (receipts || []).filter((r) => !r?.booked).length;
+}
+
 // Monatsschlüssel eines Bons ('YYYY-MM'); fällt auf createdAt zurück.
 export function receiptMonth(receipt) {
   if (/^\d{4}-\d{2}/.test(receipt.date || '')) return receipt.date.slice(0, 7);

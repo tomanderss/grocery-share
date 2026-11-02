@@ -775,3 +775,91 @@ test.describe('Positionskarte', () => {
     await expect(page.locator('.split-btns')).toHaveCount(1);
   });
 });
+
+test.describe('Eingetragen-Merker', () => {
+  // Legt abgeschlossene Bons an (zwei davon bereits eingetragen).
+  async function seedBooked(page) {
+    await page.evaluate(() => {
+      const mk = (store, cents, booked) => {
+        const d = window.__gs.newDraft({ store, totalCents: cents });
+        d.status = 'final';
+        if (booked) { d.booked = true; d.bookedAt = Date.now(); }
+      };
+      mk('REWE', 2847, true);
+      mk('EDEKA', 1299, false);
+      mk('ALDI', 3410, false);
+      window.__gs.state.currentId = null;
+      window.__gs.state.screen = 'home';
+    });
+    await page.waitForSelector('.receipt-row');
+  }
+
+  test('Bon-Zeilen sind nach Status markiert und zählen den offenen Rest', async ({ page }) => {
+    await gotoApp(page);
+    await seedBooked(page);
+    await expect(page.locator('.receipt-row.booked')).toHaveCount(1);
+    await expect(page.locator('.receipt-row.unbooked')).toHaveCount(2);
+    await expect(page.locator('.section-note')).toHaveText('2 noch einzutragen');
+    // der Haken selbst zeigt den Zustand
+    await expect(page.locator('.receipt-row.booked .rr-book')).toHaveClass(/on/);
+    await expect(page.locator('.receipt-row.unbooked .rr-book').first()).not.toHaveClass(/on/);
+  });
+
+  test('Abhaken direkt aus der Liste, ohne den Bon zu öffnen', async ({ page }) => {
+    await gotoApp(page);
+    await seedBooked(page);
+    const aldi = page.locator('.receipt-row', { hasText: 'ALDI' });
+    await expect(aldi).toHaveClass(/unbooked/);
+    await aldi.locator('.rr-book').click();
+    // Bon bleibt zu, Markierung sitzt
+    await expect(page.locator('.screen.home')).toBeVisible();
+    await expect(aldi).toHaveClass(/booked/);
+    await expect(page.locator('.section-note')).toHaveText('1 noch einzutragen');
+
+    // ... und lässt sich wieder zurücknehmen
+    await aldi.locator('.rr-book').click();
+    await expect(aldi).toHaveClass(/unbooked/);
+    await expect(page.locator('.section-note')).toHaveText('2 noch einzutragen');
+  });
+
+  test('Merker überlebt einen Reload und merkt sich das Datum', async ({ page }) => {
+    await gotoApp(page);
+    await seedBooked(page);
+    await page.locator('.receipt-row', { hasText: 'EDEKA' }).locator('.rr-book').click();
+    await page.reload();
+    await page.waitForSelector('.screen.home');
+    await expect(page.locator('.receipt-row', { hasText: 'EDEKA' })).toHaveClass(/booked/);
+    const edeka = await page.evaluate(() => window.__gs.state.receipts.find((r) => r.store === 'EDEKA'));
+    expect(edeka.booked).toBe(true);
+    expect(typeof edeka.bookedAt).toBe('number');
+    // Beschriftung nennt das Datum
+    await expect(page.locator('.receipt-row', { hasText: 'EDEKA' }).locator('.rr-book'))
+      .toHaveAttribute('title', /Eingetragen am \d{2}\.\d{2}\.\d{4}/);
+  });
+
+  test('Abhaken geht auch aus der Auswertung heraus', async ({ page }) => {
+    await gotoApp(page);
+    await seedReceipt(page, { store: 'REWE', items: [item({ priceCents: 300, priceInput: '3,00' })] });
+    await page.locator('.review-actions .btn-primary').click();
+    await page.waitForSelector('.screen.summary');
+    const btn = page.locator('.book-btn');
+    await expect(btn).toHaveText('Eingetragen?');
+    await btn.click();
+    await expect(btn).toHaveText('Eingetragen');
+    await expect(btn).toHaveClass(/on/);
+    expect(await page.evaluate(() => window.__gs.state.receipts[0].booked)).toBe(true);
+  });
+
+  test('alles eingetragen → grüner Hinweis statt Zähler', async ({ page }) => {
+    await gotoApp(page);
+    await page.evaluate(() => {
+      const d = window.__gs.newDraft({ store: 'REWE', totalCents: 500 });
+      d.status = 'final'; d.booked = true; d.bookedAt = Date.now();
+      window.__gs.state.currentId = null;
+      window.__gs.state.screen = 'home';
+    });
+    await page.waitForSelector('.receipt-row');
+    await expect(page.locator('.section-note')).toHaveText('alle eingetragen');
+    await expect(page.locator('.section-note')).toHaveClass(/ok/);
+  });
+});

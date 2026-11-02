@@ -13,7 +13,7 @@ import {
 import {
   formatCents, toCents, evenSplit, normalizeSplit, isEvenSplit, proportionalSplit, rebalanceSplit,
   receiptSummary, monthSummary, itemsTotal, receiptMonth,
-  receiptPersonIds, defaultParticipantIds, reassignSplits,
+  receiptPersonIds, defaultParticipantIds, reassignSplits, unbookedCount,
   VAT_RATES, grossCents, vatTotals,
 } from './receipt.js';
 import {
@@ -218,6 +218,23 @@ function deleteReceipt(r) {
     deleteAttachmentsFor(r.id); // Original-Dateien mit aufräumen
     toast('Bon gelöscht');
   });
+}
+
+// ── Eigene Buchhaltung ──────────────────────────────────────────────────────
+// Reiner Merker: „habe ich diesen Bon schon in mein Ausgaben-System übertragen?"
+// Wird nirgends verrechnet, steuert nur die Markierung in den Bon-Listen.
+function toggleBooked(r) {
+  r.booked = !r.booked;
+  if (r.booked) r.bookedAt = Date.now(); else delete r.bookedAt;
+  persistReceipts();
+  log('bon', 'booked toggled', { booked: r.booked });
+  toast(r.booked ? 'Als eingetragen abgehakt' : 'Haken entfernt — Bon gilt wieder als offen');
+}
+
+function bookedLabel(r) {
+  if (!r?.booked) return 'Noch nicht eingetragen — tippen zum Abhaken';
+  const at = r.bookedAt ? new Date(r.bookedAt).toISOString().slice(0, 10) : '';
+  return at ? `Eingetragen am ${formatDate(at)} — tippen zum Zurücknehmen` : 'Eingetragen — tippen zum Zurücknehmen';
 }
 
 function openReceipt(r) {
@@ -1197,6 +1214,7 @@ const app = createApp({
       HOME_RECEIPTS,
       activePids, guestPersons,
       summaryFor, copySummary, summaryToTSV, shiftMonth,
+      toggleBooked, bookedLabel, unbookedCount,
       sendChat, toggleVoice,
       persistSettings, persistReceipts, applyTheme,
       addCategory, removeCategory, deleteRule,
@@ -1265,15 +1283,23 @@ const app = createApp({
         </button>
       </div>
 
-      <h2 class="section-title" v-if="state.receipts.length">Letzte Bons</h2>
+      <h2 class="section-title" v-if="state.receipts.length">
+        Letzte Bons
+        <span v-if="unbookedCount(state.receipts)" class="section-note">{{ unbookedCount(state.receipts) }} noch einzutragen</span>
+        <span v-else class="section-note ok">alle eingetragen</span>
+      </h2>
       <div class="receipt-list">
-        <button v-for="r in state.receipts.slice(0, HOME_RECEIPTS)" :key="r.id" class="receipt-row card" @click="openReceipt(r)">
-          <div class="rr-main">
-            <div class="rr-store">{{ r.store || 'Ohne Namen' }} <span v-if="r.status === 'draft'" class="chip chip-warn">Entwurf</span></div>
-            <div class="rr-date">{{ formatDate(r.date) }} · {{ r.items.length }} Positionen<span v-if="r.apiCost" class="rr-api"> · KI {{ apiCost(r.apiCost.usd) }}</span></div>
-          </div>
-          <div class="rr-total">{{ fmt(r.totalCents || summaryFor(r).grandTotal) }}</div>
-        </button>
+        <div v-for="r in state.receipts.slice(0, HOME_RECEIPTS)" :key="r.id" class="receipt-row card" :class="r.booked ? 'booked' : 'unbooked'">
+          <button class="rr-open" @click="openReceipt(r)">
+            <div class="rr-main">
+              <div class="rr-store">{{ r.store || 'Ohne Namen' }} <span v-if="r.status === 'draft'" class="chip chip-warn">Entwurf</span></div>
+              <div class="rr-date">{{ formatDate(r.date) }} · {{ r.items.length }} Positionen<span v-if="r.apiCost" class="rr-api"> · KI {{ apiCost(r.apiCost.usd) }}</span></div>
+            </div>
+            <div class="rr-total">{{ fmt(r.totalCents || summaryFor(r).grandTotal) }}</div>
+          </button>
+          <button class="rr-book" :class="{ on: r.booked }" @click="toggleBooked(r)"
+                  :title="bookedLabel(r)" :aria-label="bookedLabel(r)" v-html="ic('check', 15)"></button>
+        </div>
       </div>
       <button v-if="state.receipts.length > HOME_RECEIPTS" class="btn btn-ghost wide" @click="go('history')">
         <span v-html="ic('receipt', 18)"></span> Ganzer Verlauf ({{ state.receipts.length }} Bons)
@@ -1288,13 +1314,17 @@ const app = createApp({
     <!-- ═══ VERLAUF (alle Bons) ═══ -->
     <main v-else-if="state.screen === 'history'" class="screen history">
       <div class="receipt-list">
-        <button v-for="r in state.receipts" :key="r.id" class="receipt-row card" @click="openReceipt(r)">
-          <div class="rr-main">
-            <div class="rr-store">{{ r.store || 'Ohne Namen' }} <span v-if="r.status === 'draft'" class="chip chip-warn">Entwurf</span></div>
-            <div class="rr-date">{{ formatDate(r.date) }} · {{ r.items.length }} Positionen<span v-if="r.apiCost" class="rr-api"> · KI {{ apiCost(r.apiCost.usd) }}</span></div>
-          </div>
-          <div class="rr-total">{{ fmt(r.totalCents || summaryFor(r).grandTotal) }}</div>
-        </button>
+        <div v-for="r in state.receipts" :key="r.id" class="receipt-row card" :class="r.booked ? 'booked' : 'unbooked'">
+          <button class="rr-open" @click="openReceipt(r)">
+            <div class="rr-main">
+              <div class="rr-store">{{ r.store || 'Ohne Namen' }} <span v-if="r.status === 'draft'" class="chip chip-warn">Entwurf</span></div>
+              <div class="rr-date">{{ formatDate(r.date) }} · {{ r.items.length }} Positionen<span v-if="r.apiCost" class="rr-api"> · KI {{ apiCost(r.apiCost.usd) }}</span></div>
+            </div>
+            <div class="rr-total">{{ fmt(r.totalCents || summaryFor(r).grandTotal) }}</div>
+          </button>
+          <button class="rr-book" :class="{ on: r.booked }" @click="toggleBooked(r)"
+                  :title="bookedLabel(r)" :aria-label="bookedLabel(r)" v-html="ic('check', 15)"></button>
+        </div>
       </div>
       <div v-if="!state.receipts.length" class="empty-hint">Noch keine Bons. Fotografier den ersten! 🧾</div>
     </main>
@@ -1437,6 +1467,9 @@ const app = createApp({
           <button class="btn btn-ghost" @click="copySummary(summary, (receipt.store || 'Bon') + ' ' + formatDate(receipt.date))"><span v-html="ic('copy', 18)"></span> Tabelle kopieren</button>
           <button class="btn btn-ghost" @click="reopenReceipt"><span v-html="ic('edit', 18)"></span> Bearbeiten</button>
           <button v-if="receipt.attachmentCount" class="btn btn-ghost" @click="openOriginals(receipt)"><span v-html="ic('receipt', 18)"></span> Original ({{ receipt.attachmentCount }})</button>
+          <button class="btn btn-ghost book-btn" :class="{ on: receipt.booked }" @click="toggleBooked(receipt)">
+            <span v-html="ic('check', 18)"></span> {{ receipt.booked ? 'Eingetragen' : 'Eingetragen?' }}
+          </button>
         </div>
       </div>
       <button class="btn btn-primary wide" @click="go('home')">Fertig</button>
@@ -1486,13 +1519,17 @@ const app = createApp({
 
       <h2 class="section-title" v-if="monthReceipts.length">Bons im {{ monthLabel(state.monthKey) }}</h2>
       <div class="receipt-list">
-        <button v-for="r in monthReceipts" :key="r.id" class="receipt-row card" @click="openReceipt(r)">
-          <div class="rr-main">
-            <div class="rr-store">{{ r.store || 'Ohne Namen' }} <span v-if="r.status === 'draft'" class="chip chip-warn">Entwurf</span></div>
-            <div class="rr-date">{{ formatDate(r.date) }}<span v-if="r.apiCost" class="rr-api"> · KI {{ apiCost(r.apiCost.usd) }}</span></div>
-          </div>
-          <div class="rr-total">{{ fmt(r.totalCents || summaryFor(r).grandTotal) }}</div>
-        </button>
+        <div v-for="r in monthReceipts" :key="r.id" class="receipt-row card" :class="r.booked ? 'booked' : 'unbooked'">
+          <button class="rr-open" @click="openReceipt(r)">
+            <div class="rr-main">
+              <div class="rr-store">{{ r.store || 'Ohne Namen' }} <span v-if="r.status === 'draft'" class="chip chip-warn">Entwurf</span></div>
+              <div class="rr-date">{{ formatDate(r.date) }}<span v-if="r.apiCost" class="rr-api"> · KI {{ apiCost(r.apiCost.usd) }}</span></div>
+            </div>
+            <div class="rr-total">{{ fmt(r.totalCents || summaryFor(r).grandTotal) }}</div>
+          </button>
+          <button class="rr-book" :class="{ on: r.booked }" @click="toggleBooked(r)"
+                  :title="bookedLabel(r)" :aria-label="bookedLabel(r)" v-html="ic('check', 15)"></button>
+        </div>
       </div>
     </main>
 
