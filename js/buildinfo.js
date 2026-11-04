@@ -1,8 +1,15 @@
 // Auto-generiert von build.js — nicht manuell bearbeiten!
-export const BUILD      = '0.25';
-export const BUILD_HASH = '63fd7d9';
+export const BUILD      = '0.26';
+export const BUILD_HASH = '5e39c86';
 
 export const CHANGELOG = [
+  {
+    "version": "0.26",
+    "date": "04.11.2026",
+    "changes": [
+      "- Aufteilung rechnet jetzt ungerundet und rundet erst die Summe: bei vielen geteilten Positionen mit ungeradem Cent-Betrag (z. B. 6 × 0,99 €) bekommt nicht mehr immer dieselbe Person den Restcent – Unterschied höchstens 1 Cent."
+    ]
+  },
   {
     "version": "0.25",
     "date": "02.11.2026",
