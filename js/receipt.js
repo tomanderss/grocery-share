@@ -256,60 +256,112 @@ export function effectiveItem(item, settings, personIds = defaultParticipantIds(
 //   rows: [{ categoryId, name, sharedTotal, sharedPer: {pid}, single: {pid}, total }],
 //   personTotals: {pid}, sharedGrandPer: {pid}, grandTotal
 // }
-// sharedPer ist für alle Personen identisch aufgeteilt (Restcent-Verteilung kann
-// um 1 Cent differieren — deterministisch).
-export function receiptSummary(receipt, settings) {
-  const personIds = receiptPersonIds(receipt, settings);
-  const byCat = new Map();
-  settings.categories.forEach((c) => {
-    byCat.set(c.id, {
-      categoryId: c.id,
-      name: c.name,
-      sharedTotal: 0,
-      sharedPer: Object.fromEntries(personIds.map((pid) => [pid, 0])),
-      single: Object.fromEntries(personIds.map((pid) => [pid, 0])),
-      total: 0,
-      // Artikelnamen der Kategorie (dedupliziert) — die UI zeigt sie z.B. bei
-      // "Sonstiges" in Klammern an, damit klar ist, was da drinsteckt.
-      itemNames: [],
-    });
+// Gerechnet wird UNGERUNDET: die Anteile jeder Position werden exakt (Bruchteile
+// von Cents) aufsummiert und erst die fertige Summe auf Cent gerundet. Sonst
+// bekäme bei 6 × 0,99 € geteilt jede Position den Restcent an dieselbe Person
+// (6 Cent Schieflage); so bleibt die Abweichung zwischen Personen ≤ 1 Cent.
+
+// Rauschen aus Float-Divisionen (z.B. 100/3) wegschneiden, damit Gleichstände
+// beim Runden als Gleichstände erkannt werden.
+const snap = (x) => Math.round(x * 1e6) / 1e6;
+
+// Exakte Werte {pid: Cent-Bruchteile} kaufmännisch auf ganze Cents runden, so
+// dass sie EXAKT `total` ergeben (größter Rest, Gleichstand → Personen-Reihenfolge).
+export function roundToTotal(exact, personIds, total) {
+  const out = {};
+  let assigned = 0;
+  const fr = personIds.map((pid, i) => {
+    const x = snap(exact[pid] || 0);
+    out[pid] = Math.floor(x);
+    assigned += out[pid];
+    return { pid, frac: snap(x - Math.floor(x)), i };
   });
+  let rest = Math.round(total) - assigned;
+  const order = fr.sort((a, b) => b.frac - a.frac || a.i - b.i);
+  for (let i = 0; rest > 0 && order.length; i++, rest--) out[order[i % order.length].pid] += 1;
+  for (let i = order.length - 1; rest < 0 && order.length; i--, rest++) {
+    out[order[((i % order.length) + order.length) % order.length].pid] -= 1;
+  }
+  return out;
+}
+
+// Exakter Anteil (ungerundet, in Cents) jeder Person an einer Position.
+function exactShares(priceCents, split, personIds, even) {
+  const out = {};
+  personIds.forEach((pid) => {
+    out[pid] = even ? priceCents / personIds.length : (priceCents * (split[pid] || 0)) / 100;
+  });
+  return out;
+}
+
+function emptyExact(settings, personIds) {
+  const zero = () => Object.fromEntries(personIds.map((pid) => [pid, 0]));
+  const byCat = new Map();
+  (settings.categories || []).forEach((c) => byCat.set(c.id, {
+    categoryId: c.id,
+    name: c.name,
+    sharedTotal: 0,
+    sharedPer: zero(),
+    single: zero(),
+    total: 0,
+    // Artikelnamen der Kategorie (dedupliziert) — die UI zeigt sie z.B. bei
+    // "Sonstiges" in Klammern an, damit klar ist, was da drinsteckt.
+    itemNames: [],
+  }));
+  return { byCat, personTotals: zero(), grandTotal: 0 };
+}
+
+// Ungerundete Auswertung eines Bons in ein (ggf. gemeinsames) Akkumulat addieren.
+function accumulateExact(acc, receipt, settings) {
+  const personIds = receiptPersonIds(receipt, settings);
+  const { byCat } = acc;
   // Unbekannte Kategorie-IDs (z.B. gelöschte Kategorie) → Standard-Kategorie
   const fallbackId = byCat.has(settings.defaultCategoryId)
     ? settings.defaultCategoryId
     : settings.categories[0]?.id;
-
-  let grandTotal = 0;
-  const personTotals = Object.fromEntries(personIds.map((pid) => [pid, 0]));
-
   (receipt.items || []).forEach((raw) => {
     const item = effectiveItem(raw, settings, personIds, !!receipt.netPrices);
     const row = byCat.get(byCat.has(item.categoryId) ? item.categoryId : fallbackId);
     if (!row) return;
-    grandTotal += item.priceCents;
+    acc.grandTotal += item.priceCents;
     const name = String(item.name || '').trim();
     if (name && !row.itemNames.includes(name)) row.itemNames.push(name);
+    // Gleichmäßig = über DIESEN Bon geteilt (jeder Bon mit seiner Besetzung).
     const even = isEvenSplit(item.split, personIds);
-    const shares = even
-      ? splitEvenly(item.priceCents, personIds)
-      : splitAmount(item.priceCents, item.split, personIds);
-    personIds.forEach((pid) => { personTotals[pid] += shares[pid]; });
+    const shares = exactShares(item.priceCents, item.split, personIds, even);
+    personIds.forEach((pid) => { acc.personTotals[pid] = (acc.personTotals[pid] || 0) + shares[pid]; });
     if (even) {
       row.sharedTotal += item.priceCents;
-      personIds.forEach((pid) => { row.sharedPer[pid] += shares[pid]; });
+      personIds.forEach((pid) => { row.sharedPer[pid] = (row.sharedPer[pid] || 0) + shares[pid]; });
     } else {
-      personIds.forEach((pid) => { row.single[pid] += shares[pid]; });
+      personIds.forEach((pid) => { row.single[pid] = (row.single[pid] || 0) + shares[pid]; });
     }
     row.total += item.priceCents;
   });
+}
 
-  const rows = [...byCat.values()].filter(
-    (r) => r.total !== 0 || r.sharedTotal !== 0 || personIds.some((pid) => r.single[pid] !== 0)
-  );
+// Erst hier wird gerundet: jede Tabellenzelle-Gruppe summiert exakt auf ihre
+// (ganzzahlige) Cent-Summe, die Personen-Gesamtsummen exakt auf grandTotal.
+function roundExact(acc, personIds) {
+  const rows = [...acc.byCat.values()]
+    .filter((r) => r.total !== 0 || r.sharedTotal !== 0 || personIds.some((pid) => snap(r.single[pid] || 0) !== 0))
+    .map((r) => ({
+      ...r,
+      sharedPer: roundToTotal(r.sharedPer, personIds, r.sharedTotal),
+      single: roundToTotal(r.single, personIds, r.total - r.sharedTotal),
+    }));
+  const personTotals = roundToTotal(acc.personTotals, personIds, acc.grandTotal);
   const sharedGrandPer = Object.fromEntries(
     personIds.map((pid) => [pid, rows.reduce((a, r) => a + r.sharedPer[pid], 0)])
   );
-  return { rows, personTotals, sharedGrandPer, grandTotal, personIds };
+  return { rows, personTotals, sharedGrandPer, grandTotal: acc.grandTotal, personIds };
+}
+
+export function receiptSummary(receipt, settings) {
+  const personIds = receiptPersonIds(receipt, settings);
+  const acc = emptyExact(settings, personIds);
+  accumulateExact(acc, receipt, settings);
+  return roundExact(acc, personIds);
 }
 
 // Summe der Positionsbeträge (zur Plausibilitätsprüfung gegen den Bon-Gesamtbetrag).
@@ -322,7 +374,10 @@ export function itemsTotal(receipt, settings) {
 
 // ── Monats-Übersicht ──────────────────────────────────────────────────────────
 // Aggregiert alle FINALEN Bons eines Monats ('YYYY-MM') zu derselben
-// Tabellenstruktur wie receiptSummary.
+// Tabellenstruktur wie receiptSummary. Auch hier wird UNGERUNDET über alle Bons
+// summiert und erst am Ende gerundet — sonst summierten sich die Rundungen der
+// einzelnen Bons wieder auf. Folge: die Monatswerte können um 1–2 Cent von der
+// Summe der (gerundeten) Einzel-Bons abweichen; die Monatswerte sind genauer.
 export function monthSummary(receipts, settings, yearMonth) {
   const list = receipts.filter(
     (r) => r.status === 'final' && (r.date || '').startsWith(yearMonth)
@@ -335,47 +390,12 @@ export function monthSummary(receipts, settings, yearMonth) {
   const seen = order.filter((pid) => involved.has(pid));
   const personIds = seen.length ? seen : defaultParticipantIds(settings);
 
-  const zero = () => Object.fromEntries(personIds.map((pid) => [pid, 0]));
-  const byCat = new Map();
-  (settings.categories || []).forEach((c) => byCat.set(c.id, {
-    categoryId: c.id,
-    name: c.name,
-    sharedTotal: 0,
-    sharedPer: zero(),
-    single: zero(),
-    total: 0,
-    itemNames: [],
-  }));
-  const personTotals = zero();
-  let grandTotal = 0;
-
   // JEDER Bon wird mit SEINER Besetzung ausgewertet und erst danach aufaddiert —
   // sonst würde ein 50:50-Bon in einem Monat mit Gast fälschlich als "einzeln"
   // gelten, weil der Gast dort 0 % hätte.
-  list.forEach((r) => {
-    const s = receiptSummary(r, settings);
-    grandTotal += s.grandTotal;
-    personIds.forEach((pid) => { personTotals[pid] += s.personTotals[pid] || 0; });
-    s.rows.forEach((row) => {
-      const target = byCat.get(row.categoryId);
-      if (!target) return;
-      target.sharedTotal += row.sharedTotal;
-      target.total += row.total;
-      personIds.forEach((pid) => {
-        target.sharedPer[pid] += row.sharedPer[pid] || 0;
-        target.single[pid] += row.single[pid] || 0;
-      });
-      row.itemNames.forEach((n) => { if (!target.itemNames.includes(n)) target.itemNames.push(n); });
-    });
-  });
-
-  const rows = [...byCat.values()].filter(
-    (r) => r.total !== 0 || r.sharedTotal !== 0 || personIds.some((pid) => r.single[pid] !== 0)
-  );
-  const sharedGrandPer = Object.fromEntries(
-    personIds.map((pid) => [pid, rows.reduce((a, r) => a + r.sharedPer[pid], 0)])
-  );
-  return { rows, personTotals, sharedGrandPer, grandTotal, personIds, receiptCount: list.length };
+  const acc = emptyExact(settings, personIds);
+  list.forEach((r) => accumulateExact(acc, r, settings));
+  return { ...roundExact(acc, personIds), receiptCount: list.length };
 }
 
 // ── Eigene Buchhaltung ───────────────────────────────────────────────────────

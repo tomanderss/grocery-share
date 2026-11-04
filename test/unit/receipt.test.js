@@ -534,3 +534,33 @@ describe('Wer hat bezahlt (reine Information)', () => {
     assert.deepEqual(paidTotals(null, SETTINGS), { p1: 0, p2: 0 });
   });
 });
+
+describe('Ungerundet rechnen, erst am Ende runden', () => {
+  test('6 × 0,99 € geteilt: keine Restcent-Schieflage pro Position', () => {
+    const items = Array.from({ length: 6 }, (_, i) => item({ id: `i${i}`, priceCents: 99 }));
+    const s = receiptSummary({ items }, SETTINGS);
+    // früher 300/294 — jeder Restcent ging an Tom
+    assert.deepEqual(s.personTotals, { p1: 297, p2: 297 });
+    assert.deepEqual(s.rows[0].sharedPer, { p1: 297, p2: 297 });
+  });
+
+  test('ungerade Summe: maximal 1 Cent Unterschied, Summe bleibt exakt', () => {
+    const items = Array.from({ length: 5 }, (_, i) => item({ id: `i${i}`, priceCents: 99 }));
+    const s = receiptSummary({ items }, SETTINGS);
+    assert.equal(s.personTotals.p1 + s.personTotals.p2, 495);
+    assert.ok(Math.abs(s.personTotals.p1 - s.personTotals.p2) <= 1);
+  });
+
+  test('ungerade Prozent-Splits summieren exakt über viele Positionen', () => {
+    const items = Array.from({ length: 10 }, (_, i) => item({ id: `i${i}`, priceCents: 101, split: { p1: 70, p2: 30 } }));
+    const s = receiptSummary({ items }, SETTINGS);
+    assert.deepEqual(s.personTotals, { p1: 707, p2: 303 });
+  });
+
+  test('Monat summiert ungerundet über alle Bons', () => {
+    const bon = (id) => ({ id, status: 'final', date: '2026-05-0' + id, items: [item({ priceCents: 99 })] });
+    const m = monthSummary([bon('1'), bon('2'), bon('3'), bon('4')], SETTINGS, '2026-05');
+    // 4 Bons à 0,99 € — einzeln gerundet wären es 200/196
+    assert.deepEqual(m.personTotals, { p1: 198, p2: 198 });
+  });
+});
