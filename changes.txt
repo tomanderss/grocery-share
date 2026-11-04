@@ -1,0 +1,1 @@
+- Aufteilung rechnet jetzt ungerundet und rundet erst die Summe: bei vielen geteilten Positionen mit ungeradem Cent-Betrag (z. B. 6 × 0,99 €) bekommt nicht mehr immer dieselbe Person den Restcent – Unterschied höchstens 1 Cent.
