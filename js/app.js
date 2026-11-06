@@ -14,7 +14,7 @@ import {
   formatCents, toCents, evenSplit, normalizeSplit, isEvenSplit, proportionalSplit, rebalanceSplit,
   receiptSummary, monthSummary, itemsTotal, receiptMonth,
   receiptPersonIds, defaultParticipantIds, reassignSplits, unbookedCount, payerId, paidTotals,
-  VAT_RATES, grossCents, vatTotals,
+  VAT_RATES, grossCents, vatTotals, itemGrossCents,
 } from './receipt.js';
 import {
   applyRules, learnFromReceipt, rulesForPrompt, normalizeKey, normalizeRules,
@@ -1205,6 +1205,8 @@ const app = createApp({
     const summary = computed(() => (receipt.value ? summaryFor(receipt.value) : null));
     // Netto/Steuer/Brutto des offenen Bons — nur bei Netto-Bons befüllt
     const vat = computed(() => (receipt.value ? vatTotals(receipt.value, state.settings) : null));
+    // Brutto je Position, je Steuersatz auf die Netto-Summe gerundet (wie der Bon)
+    const itemGross = computed(() => (receipt.value ? itemGrossCents(receipt.value, state.settings) : []));
     const month = computed(() => monthFor(state.monthKey));
     const monthReceipts = computed(() => receiptsOfMonth(state.monthKey));
     // Wer im Monat wie viel ausgelegt hat — nur die abgeschlossenen Bons, damit
@@ -1240,7 +1242,7 @@ const app = createApp({
       addItem, removeItem, onPriceInput, onNameInput, onTotalInput, setQuickSplit, splitMode, splitLabel,
       applySplitEditor, editorResult, onSplitSlider, toggleLock, setKind, pickCategory, hasBadges, DEPOSIT_PICK, finalizeReceipt, reopenReceipt, discardChanges,
       addPerson, removePerson, togglePersonFixed, toggleParticipant,
-      toggleNetPrices, setVatRate, vatOptions, grossCents, vat,
+      toggleNetPrices, setVatRate, vatOptions, grossCents, vat, itemGross,
       availableModels, refreshModels, modelForecast, modelForecastLabel,
       HOME_RECEIPTS,
       activePids, guestPersons,
@@ -1325,7 +1327,7 @@ const app = createApp({
           <button class="rr-open" @click="openReceipt(r)">
             <div class="rr-main">
               <div class="rr-store">{{ r.store || 'Ohne Namen' }} <span v-if="r.status === 'draft'" class="chip chip-warn">Entwurf</span><span class="chip chip-payer" :title="'Bezahlt von ' + payerName(r)"><span v-html="ic('wallet', 12)"></span>{{ payerName(r) }}</span></div>
-              <div class="rr-date">{{ formatDate(r.date) }} · {{ r.items.length }} Positionen<span v-if="r.apiCost" class="rr-api"> · KI {{ apiCost(r.apiCost.usd) }}</span></div>
+              <div class="rr-date"><span class="nw">{{ formatDate(r.date) }}</span> · <span class="nw">{{ r.items.length }} Positionen</span><template v-if="r.apiCost"> · <span class="rr-api nw">KI {{ apiCost(r.apiCost.usd) }}</span></template></div>
             </div>
             <div class="rr-total">{{ fmt(r.totalCents || summaryFor(r).grandTotal) }}</div>
           </button>
@@ -1350,7 +1352,7 @@ const app = createApp({
           <button class="rr-open" @click="openReceipt(r)">
             <div class="rr-main">
               <div class="rr-store">{{ r.store || 'Ohne Namen' }} <span v-if="r.status === 'draft'" class="chip chip-warn">Entwurf</span><span class="chip chip-payer" :title="'Bezahlt von ' + payerName(r)"><span v-html="ic('wallet', 12)"></span>{{ payerName(r) }}</span></div>
-              <div class="rr-date">{{ formatDate(r.date) }} · {{ r.items.length }} Positionen<span v-if="r.apiCost" class="rr-api"> · KI {{ apiCost(r.apiCost.usd) }}</span></div>
+              <div class="rr-date"><span class="nw">{{ formatDate(r.date) }}</span> · <span class="nw">{{ r.items.length }} Positionen</span><template v-if="r.apiCost"> · <span class="rr-api nw">KI {{ apiCost(r.apiCost.usd) }}</span></template></div>
             </div>
             <div class="rr-total">{{ fmt(r.totalCents || summaryFor(r).grandTotal) }}</div>
           </button>
@@ -1408,7 +1410,7 @@ const app = createApp({
       </div>
 
       <div class="item-list">
-        <div v-for="item in receipt.items" :key="item.id" class="card item-card" :class="{ review: item.needsReview, deposit: item.kind !== 'normal' }">
+        <div v-for="(item, idx) in receipt.items" :key="item.id" class="card item-card" :class="{ review: item.needsReview, deposit: item.kind !== 'normal' }">
           <div class="item-top">
             <textarea class="item-name" rows="1" v-autogrow v-model="item.name" placeholder="Artikel"
                       @keydown.enter.prevent @change="onNameInput(item)"></textarea>
@@ -1442,7 +1444,7 @@ const app = createApp({
                 </select>
                 MwSt.
               </span>
-              <span class="chip chip-good">netto {{ fmt(item.priceCents) }} → brutto {{ fmt(grossCents(item.priceCents, item.vatRate)) }}</span>
+              <span class="chip chip-good">netto {{ fmt(item.priceCents) }} → brutto {{ fmt(itemGross[idx] ?? grossCents(item.priceCents, item.vatRate)) }}</span>
             </template>
             <span v-if="item.fromRule" class="chip chip-good" title="Aus gelernter Regel">gelernt</span>
             <span v-if="item.needsReview" class="chip chip-warn">prüfen</span>
@@ -1566,7 +1568,7 @@ const app = createApp({
           <button class="rr-open" @click="openReceipt(r)">
             <div class="rr-main">
               <div class="rr-store">{{ r.store || 'Ohne Namen' }} <span v-if="r.status === 'draft'" class="chip chip-warn">Entwurf</span><span class="chip chip-payer" :title="'Bezahlt von ' + payerName(r)"><span v-html="ic('wallet', 12)"></span>{{ payerName(r) }}</span></div>
-              <div class="rr-date">{{ formatDate(r.date) }}<span v-if="r.apiCost" class="rr-api"> · KI {{ apiCost(r.apiCost.usd) }}</span></div>
+              <div class="rr-date"><span class="nw">{{ formatDate(r.date) }}</span><template v-if="r.apiCost"> · <span class="rr-api nw">KI {{ apiCost(r.apiCost.usd) }}</span></template></div>
             </div>
             <div class="rr-total">{{ fmt(r.totalCents || summaryFor(r).grandTotal) }}</div>
           </button>
