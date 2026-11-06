@@ -213,23 +213,61 @@ export function grossCents(netCents, vatRate) {
   return Math.round(net * (1 + rate / 100));
 }
 
+// Brutto je Position eines Netto-Bons. METRO & Co. rechnen die Steuer auf die
+// NETTO-SUMME je Satz und runden einmal — nicht je Position. Würde jede Position
+// einzeln aufgeschlagen und gerundet, läge die Summe schnell 1 Cent neben dem
+// Bon. Darum: je Satz Ziel = round(Σnetto × (1+Satz)), verteilt per größtem Rest
+// auf die exakten Brutto-Anteile der Positionen. Liefert ein Array parallel zu
+// receipt.items (bei Brutto-Bons einfach die effektiven Preise).
+export function itemGrossCents(receipt, settings) {
+  const personIds = receiptPersonIds(receipt, settings);
+  const items = receipt?.items || [];
+  const nets = items.map((raw) => effectiveItem(raw, settings, personIds).priceCents);
+  if (!receipt?.netPrices) return nets;
+  const out = nets.slice();
+  const groups = new Map();
+  items.forEach((raw, i) => {
+    const rate = Number(raw.vatRate) || 0;
+    if (!groups.has(rate)) groups.set(rate, []);
+    groups.get(rate).push(i);
+  });
+  groups.forEach((idx, rate) => {
+    if (!rate) return;
+    const keys = idx.map(String);
+    const exact = Object.fromEntries(idx.map((i) => [String(i), nets[i] * (1 + rate / 100)]));
+    const netSum = idx.reduce((a, i) => a + nets[i], 0);
+    const shares = roundToTotal(exact, keys, Math.round(netSum * (1 + rate / 100)));
+    idx.forEach((i) => { out[i] = shares[String(i)]; });
+  });
+  return out;
+}
+
+// Effektive Positionen eines ganzen Bons (Pfandregeln + Brutto je Satz verteilt).
+function effectiveItems(receipt, settings, personIds) {
+  const gross = itemGrossCents(receipt, settings);
+  return (receipt.items || []).map((raw, i) => ({
+    ...effectiveItem(raw, settings, personIds),
+    priceCents: gross[i],
+  }));
+}
+
 // Netto/Steuer/Brutto eines ganzen Bons, zusätzlich je Steuersatz aufgeschlüsselt
 // (zum Abgleich mit dem Steuerblock am Ende des Bons).
 export function vatTotals(receipt, settings) {
   const personIds = receiptPersonIds(receipt, settings);
   const out = { netCents: 0, vatCents: 0, grossCents: 0, byRate: {} };
   if (!receipt?.netPrices) return out;
-  (receipt.items || []).forEach((raw) => {
+  const gross = itemGrossCents(receipt, settings);
+  (receipt.items || []).forEach((raw, i) => {
     // effectiveItem OHNE Steuer aufrufen, damit nur die Vorzeichen-/Pfandregeln greifen
     const net = effectiveItem(raw, settings, personIds).priceCents;
     const rate = Number(raw.vatRate) || 0;
-    const gross = grossCents(net, rate);
     out.netCents += net;
-    out.grossCents += gross;
-    out.vatCents += gross - net;
+    out.grossCents += gross[i];
+    out.vatCents += gross[i] - net;
     const b = out.byRate[rate] || (out.byRate[rate] = { netCents: 0, vatCents: 0 });
     b.netCents += net;
-    b.vatCents += gross - net;
+    b.vatCents += gross[i] - net;
   });
   return out;
 }
@@ -319,8 +357,7 @@ function accumulateExact(acc, receipt, settings) {
   const fallbackId = byCat.has(settings.defaultCategoryId)
     ? settings.defaultCategoryId
     : settings.categories[0]?.id;
-  (receipt.items || []).forEach((raw) => {
-    const item = effectiveItem(raw, settings, personIds, !!receipt.netPrices);
+  effectiveItems(receipt, settings, personIds).forEach((item) => {
     const row = byCat.get(byCat.has(item.categoryId) ? item.categoryId : fallbackId);
     if (!row) return;
     acc.grandTotal += item.priceCents;
@@ -367,9 +404,7 @@ export function receiptSummary(receipt, settings) {
 // Summe der Positionsbeträge (zur Plausibilitätsprüfung gegen den Bon-Gesamtbetrag).
 export function itemsTotal(receipt, settings) {
   const personIds = receiptPersonIds(receipt, settings);
-  return (receipt.items || []).reduce(
-    (a, raw) => a + effectiveItem(raw, settings, personIds, !!receipt.netPrices).priceCents, 0
-  );
+  return effectiveItems(receipt, settings, personIds).reduce((a, item) => a + item.priceCents, 0);
 }
 
 // ── Monats-Übersicht ──────────────────────────────────────────────────────────

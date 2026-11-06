@@ -5,7 +5,7 @@ import {
   splitAmount, effectiveItem, receiptSummary, itemsTotal, monthSummary, receiptMonth,
   receiptPersonIds, defaultParticipantIds, reassignSplits, splitEvenly, unbookedCount,
   payerId, paidTotals,
-  grossCents, vatTotals, VAT_RATES,
+  grossCents, vatTotals, VAT_RATES, itemGrossCents,
 } from '../../js/receipt.js';
 
 const SETTINGS = {
@@ -562,5 +562,27 @@ describe('Ungerundet rechnen, erst am Ende runden', () => {
     const m = monthSummary([bon('1'), bon('2'), bon('3'), bon('4')], SETTINGS, '2026-05');
     // 4 Bons à 0,99 € — einzeln gerundet wären es 200/196
     assert.deepEqual(m.personTotals, { p1: 198, p2: 198 });
+  });
+});
+
+describe('Netto-Bons: Steuer je Satz auf die Netto-Summe (wie METRO)', () => {
+  test('3 × 0,10 € netto zu 7 %: 0,32 € (exakt 0,321) statt 3 × 0,11 € = 0,33 €', () => {
+    const r = { netPrices: true, items: [0, 1, 2].map((i) => item({ id: `i${i}`, priceCents: 10, vatRate: 7 })) };
+    assert.equal(itemsTotal(r, SETTINGS), 32);
+    assert.equal(itemGrossCents(r, SETTINGS).reduce((a, b) => a + b, 0), 32);
+    assert.equal(vatTotals(r, SETTINGS).grossCents, 32);
+    assert.equal(receiptSummary(r, SETTINGS).grandTotal, 32);
+  });
+
+  test('Sätze werden getrennt gerundet, Brutto-Bons bleiben unberührt', () => {
+    const r = {
+      netPrices: true,
+      items: [
+        item({ id: 'a', priceCents: 10, vatRate: 7 }), item({ id: 'b', priceCents: 10, vatRate: 7 }),
+        item({ id: 'c', priceCents: 1000, vatRate: 19 }), item({ id: 'd', priceCents: 500, vatRate: 0 }),
+      ],
+    };
+    assert.deepEqual(itemGrossCents(r, SETTINGS), [11, 10, 1190, 500]);
+    assert.deepEqual(itemGrossCents({ ...r, netPrices: false }, SETTINGS), [10, 10, 1000, 500]);
   });
 });
