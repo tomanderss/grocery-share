@@ -1,2 +1,0 @@
-- Behoben: Netto-Bons (METRO) lagen in der Summe teils 1 Cent neben dem Bon – die MwSt. wird jetzt wie auf dem Bon je Steuersatz auf die Netto-Summe gerechnet statt je Position gerundet.
-- Bon-Liste: die KI-Kosten brechen nicht mehr mitten in der Zahl um („15,4 | ¢").

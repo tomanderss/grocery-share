@@ -1,8 +1,16 @@
 // Auto-generiert von build.js — nicht manuell bearbeiten!
-export const BUILD      = '0.26';
-export const BUILD_HASH = '5e39c86';
+export const BUILD      = '0.27';
+export const BUILD_HASH = '2ae2d65';
 
 export const CHANGELOG = [
+  {
+    "version": "0.27",
+    "date": "06.11.2026",
+    "changes": [
+      "- Behoben: Netto-Bons (METRO) lagen in der Summe teils 1 Cent neben dem Bon – die MwSt. wird jetzt wie auf dem Bon je Steuersatz auf die Netto-Summe gerechnet statt je Position gerundet.",
+      "- Bon-Liste: die KI-Kosten brechen nicht mehr mitten in der Zahl um („15,4 | ¢\")."
+    ]
+  },
   {
     "version": "0.26",
     "date": "04.11.2026",
