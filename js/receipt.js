@@ -345,6 +345,9 @@ function emptyExact(settings, personIds) {
     // Artikelnamen der Kategorie (dedupliziert) — die UI zeigt sie z.B. bei
     // "Sonstiges" in Klammern an, damit klar ist, was da drinsteckt.
     itemNames: [],
+    // Je Position eine Zeile {name, cents, count} (Gesamtpreis brutto, nicht je
+    // Person) — für die Artikelliste mit Preisen unter "Sonstiges".
+    itemList: [],
   }));
   return { byCat, personTotals: zero(), grandTotal: 0 };
 }
@@ -363,6 +366,7 @@ function accumulateExact(acc, receipt, settings) {
     acc.grandTotal += item.priceCents;
     const name = String(item.name || '').trim();
     if (name && !row.itemNames.includes(name)) row.itemNames.push(name);
+    row.itemList.push({ name: name || 'Ohne Namen', cents: item.priceCents, count: 1 });
     // Gleichmäßig = über DIESEN Bon geteilt (jeder Bon mit seiner Besetzung).
     const even = isEvenSplit(item.split, personIds);
     const shares = exactShares(item.priceCents, item.split, personIds, even);
@@ -430,7 +434,24 @@ export function monthSummary(receipts, settings, yearMonth) {
   // gelten, weil der Gast dort 0 % hätte.
   const acc = emptyExact(settings, personIds);
   list.forEach((r) => accumulateExact(acc, r, settings));
-  return { ...roundExact(acc, personIds), receiptCount: list.length };
+  const out = roundExact(acc, personIds);
+  // Im Monat gleichnamige Artikel zusammenfassen („2× Blume"), sonst wird die
+  // Liste über viele Bons zu lang.
+  out.rows = out.rows.map((r) => ({ ...r, itemList: mergeItemList(r.itemList) }));
+  return { ...out, receiptCount: list.length };
+}
+
+// Gleichnamige Einträge (Groß-/Kleinschreibung egal) zusammenfassen: Anzahl und
+// Summe addieren, Reihenfolge des ersten Auftretens bleibt.
+export function mergeItemList(list) {
+  const byKey = new Map();
+  (list || []).forEach((e) => {
+    const key = e.name.toLowerCase();
+    const hit = byKey.get(key);
+    if (hit) { hit.count += e.count || 1; hit.cents += e.cents; }
+    else byKey.set(key, { name: e.name, cents: e.cents, count: e.count || 1 });
+  });
+  return [...byKey.values()];
 }
 
 // ── Eigene Buchhaltung ───────────────────────────────────────────────────────

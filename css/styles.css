@@ -212,7 +212,14 @@ label { display: flex; flex-direction: column; gap: 4px; font-size: .76rem; colo
 .sum-table td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .sum-table tfoot td { border-top: 2px solid var(--grid); font-weight: 800; padding-top: 10px; }
 .sum-table .cat-total td { font-weight: 700; background: var(--bg2); }
-.cat-items { color: var(--text3); font-weight: 400; font-size: .72rem; margin-top: 2px; line-height: 1.3; }
+/* Artikelliste unter „Sonstiges gesamt": je Position eine kompakte Zeile,
+   Name links, Gesamtpreis rechtsbündig — klein und leise, damit die Tabelle
+   nicht aufbläht. */
+.cat-items { list-style: none; margin: 3px 0 0; padding: 0; color: var(--text3); font-weight: 400;
+  font-size: .72rem; line-height: 1.35; }
+.cat-items li { display: flex; gap: 8px; justify-content: space-between; }
+.ci-name { min-width: 0; overflow-wrap: anywhere; }
+.ci-price { flex: none; font-variant-numeric: tabular-nums; }
 .rule-hint { display: flex; align-items: flex-start; gap: 5px; font-size: .72rem; color: var(--text3); line-height: 1.35; }
 .rule-hint .icon { flex: none; margin-top: 1px; color: var(--warn); }
 .sum-table .strong { color: var(--accent); }
