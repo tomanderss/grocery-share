@@ -463,6 +463,20 @@ export function paidTotals(receipts, settings) {
   return totals;
 }
 
+// Verlauf umsortieren: Bon `id` an Position `toIndex` (gezählt OHNE den Bon
+// selbst) schieben. Liefert bei unveränderter Position dieselbe Liste zurück,
+// damit Drag-Bewegungen ohne Positionswechsel nichts neu rendern.
+export function moveReceipt(list, id, toIndex) {
+  const from = list.findIndex((r) => r.id === id);
+  if (from < 0) return list;
+  const to = Math.max(0, Math.min(list.length - 1, Math.trunc(toIndex) || 0));
+  if (to === from) return list;
+  const next = list.slice();
+  const [r] = next.splice(from, 1);
+  next.splice(to, 0, r);
+  return next;
+}
+
 // Monatsschlüssel eines Bons ('YYYY-MM'); fällt auf createdAt zurück.
 export function receiptMonth(receipt) {
   if (/^\d{4}-\d{2}/.test(receipt.date || '')) return receipt.date.slice(0, 7);

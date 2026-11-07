@@ -937,3 +937,69 @@ test.describe('Wer hat bezahlt', () => {
   });
 });
 
+
+test.describe('Datum nicht erkennbar', () => {
+  test('KI ohne Datum → heute eingetragen + Hinweis, verschwindet nach Korrektur', async ({ page }) => {
+    await gotoApp(page);
+    await page.evaluate(() => {
+      const r = window.__gs.buildDraftFromAnalysis({ store: 'REWE', date: '', total: 1, items: [], notes: '', netPrices: false });
+      window.__gs.state.currentId = r.id;
+      window.__gs.state.screen = 'review';
+    });
+    await page.waitForSelector('.screen.review');
+    const today = new Date().toISOString().slice(0, 10);
+    await expect(page.locator('input[type=date]')).toHaveValue(today);
+    await expect(page.locator('.date-missing')).toContainText('Kaufdatum');
+    await page.locator('input[type=date]').fill('2026-11-01');
+    await page.locator('input[type=date]').dispatchEvent('change');
+    await expect(page.locator('.date-missing')).toHaveCount(0);
+    expect(await page.evaluate(() => window.__gs.state.receipts[0].dateMissing)).toBeUndefined();
+  });
+
+  test('mit erkanntem Datum kein Hinweis', async ({ page }) => {
+    await gotoApp(page);
+    await page.evaluate(() => {
+      const r = window.__gs.buildDraftFromAnalysis({ store: 'REWE', date: '2026-10-30', total: 1, items: [], notes: '', netPrices: false });
+      window.__gs.state.currentId = r.id;
+      window.__gs.state.screen = 'review';
+    });
+    await page.waitForSelector('.screen.review');
+    await expect(page.locator('.date-missing')).toHaveCount(0);
+  });
+});
+
+test.describe('Verlauf umsortieren', () => {
+  test('Bon per Griff nach unten ziehen ändert die gespeicherte Reihenfolge', async ({ page }) => {
+    await gotoApp(page);
+    await page.evaluate(() => {
+      ['C', 'B', 'A'].forEach((store) => window.__gs.newDraft({ store, date: '2026-11-01' }));
+      window.__gs.state.screen = 'history';
+    });
+    const names = () => page.locator('.history .rr-name').allInnerTexts();
+    await expect.poll(names).toEqual(['A', 'B', 'C']);
+    const grip = page.locator('.history .rr-grip').first();
+    const last = page.locator('.history .receipt-row').nth(2);
+    const g = await grip.boundingBox();
+    const t = await last.boundingBox();
+    await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(g.x + g.width / 2, t.y + t.height - 4, { steps: 8 });
+    await page.mouse.up();
+    await expect.poll(names).toEqual(['B', 'C', 'A']);
+    const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('gs_receipts')).map((r) => r.store));
+    expect(stored).toEqual(['B', 'C', 'A']);
+  });
+});
+
+test.describe('Bon-Zeilen', () => {
+  test('alle Zeilen gleich hoch, egal ob mit/ohne KI-Kosten oder Entwurf', async ({ page }) => {
+    await gotoApp(page);
+    await page.evaluate(() => {
+      const a = window.__gs.newDraft({ store: 'METRO', totalCents: 127439, apiCost: { usd: 0.154, model: 'x', inputTokens: 1, outputTokens: 1 } });
+      a.status = 'final';
+      window.__gs.newDraft({ store: 'Fressnapf', totalCents: 3886 });
+    });
+    const heights = await page.locator('.home .receipt-row').evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().height)));
+    expect(new Set(heights).size).toBe(1);
+  });
+});

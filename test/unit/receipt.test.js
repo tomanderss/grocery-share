@@ -4,7 +4,7 @@ import {
   toCents, formatCents, evenSplit, isEvenSplit, normalizeSplit, proportionalSplit, rebalanceSplit,
   splitAmount, effectiveItem, receiptSummary, itemsTotal, monthSummary, receiptMonth,
   receiptPersonIds, defaultParticipantIds, reassignSplits, splitEvenly, unbookedCount,
-  payerId, paidTotals,
+  payerId, paidTotals, moveReceipt,
   grossCents, vatTotals, VAT_RATES, itemGrossCents,
 } from '../../js/receipt.js';
 
@@ -584,5 +584,19 @@ describe('Netto-Bons: Steuer je Satz auf die Netto-Summe (wie METRO)', () => {
     };
     assert.deepEqual(itemGrossCents(r, SETTINGS), [11, 10, 1190, 500]);
     assert.deepEqual(itemGrossCents({ ...r, netPrices: false }, SETTINGS), [10, 10, 1000, 500]);
+  });
+});
+
+describe('moveReceipt (Verlauf umsortieren)', () => {
+  const L = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+  test('verschiebt an die Zielposition, Original bleibt unverändert', () => {
+    assert.deepEqual(moveReceipt(L, 'a', 2).map((r) => r.id), ['b', 'c', 'a']);
+    assert.deepEqual(moveReceipt(L, 'c', 0).map((r) => r.id), ['c', 'a', 'b']);
+    assert.deepEqual(L.map((r) => r.id), ['a', 'b', 'c']);
+  });
+  test('gleiche Position / unbekannte ID → dieselbe Liste', () => {
+    assert.equal(moveReceipt(L, 'b', 1), L);
+    assert.equal(moveReceipt(L, 'x', 0), L);
+    assert.deepEqual(moveReceipt(L, 'a', 99).map((r) => r.id), ['b', 'c', 'a']);
   });
 });
