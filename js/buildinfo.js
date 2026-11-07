@@ -1,8 +1,17 @@
 // Auto-generiert von build.js — nicht manuell bearbeiten!
-export const BUILD      = '0.27';
-export const BUILD_HASH = '2ae2d65';
+export const BUILD      = '0.28';
+export const BUILD_HASH = 'a913cd5';
 
 export const CHANGELOG = [
+  {
+    "version": "0.28",
+    "date": "07.11.2026",
+    "changes": [
+      "- Neu: Ist auf dem Bon kein Kaufdatum zu erkennen, trägt die App das heutige Datum ein und zeigt im Bon einen gelben Hinweis, bis du das Datum prüfst bzw. änderst.",
+      "- Neu: Im ganzen Verlauf lässt sich die Reihenfolge der Bons über den Griff links per Ziehen ändern.",
+      "- Bon-Listen mit festen Spalten: alle Zeilen sind gleich hoch, Betrag und KI-Kosten stehen rechts bündig untereinander, der Zahler in einer eigenen Spalte – nichts bricht mehr um."
+    ]
+  },
   {
     "version": "0.27",
     "date": "06.11.2026",
