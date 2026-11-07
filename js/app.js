@@ -887,6 +887,9 @@ function formatDate(iso) {
   return `${d}.${m}.${y}`;
 }
 
+// „2× Blume" bei zusammengefassten Einträgen (Monat), sonst nur der Name.
+function itemLabel(e) { return (e.count > 1 ? `${e.count}× ` : '') + e.name; }
+
 // Tabelle als Text (Tab-getrennt, für Excel/Numbers) in die Zwischenablage.
 function summaryToTSV(summary, title) {
   const pids = summary.personIds || personIds();
@@ -900,8 +903,8 @@ function summaryToTSV(summary, title) {
       lines.push([`${row.name} teilen`, ...pids.map((pid) => euro(row.sharedPer[pid]))].join('\t'));
     }
     const cat = state.settings.categories.find((c) => c.id === row.categoryId);
-    const names = (cat?.listItems || row.categoryId === 'sonstiges') && row.itemNames.length
-      ? ` (${row.itemNames.join(', ')})` : '';
+    const names = (cat?.listItems || row.categoryId === 'sonstiges') && row.itemList.length
+      ? ` (${row.itemList.map((e) => `${itemLabel(e)} ${euro(e.cents)} €`).join(', ')})` : '';
     lines.push([`${row.name} gesamt${names}`, ...pids.map((pid) => euro(row.single[pid] + row.sharedPer[pid]))].join('\t'));
   });
   lines.push(['Gesamt', ...pids.map((pid) => euro(summary.personTotals[pid]))].join('\t'));
@@ -1311,7 +1314,7 @@ const app = createApp({
       receipt, summary, month, monthReceipts, monthPaid, totalsDiff, reviewCount, sortedRules,
       creditLeft, bonsLeft, apiCost,
       ic: (name, size) => icon(name, { size }),
-      fmt, personName, categoryName, formatDate, formatDateShort, monthLabel, formatCost, formatUsd, totalApiCostUsd,
+      fmt, personName, categoryName, formatDate, formatDateShort, itemLabel, monthLabel, formatCost, formatUsd, totalApiCostUsd,
       costFactor: () => costFactor(state.credit),
       setCreditAnchor, correctCredit, resetCostFactor,
       personIds,
@@ -1340,7 +1343,7 @@ const app = createApp({
       // Artikelnamen in der Auswertung nur für Sammel-Kategorien (Sonstiges).
       showNames: (row) => {
         const c = state.settings.categories.find((x) => x.id === row.categoryId);
-        return !!(c?.listItems || row.categoryId === 'sonstiges') && row.itemNames.length > 0;
+        return !!(c?.listItems || row.categoryId === 'sonstiges') && row.itemList.length > 0;
       },
       kindLabel: (k) => (k === 'deposit' ? 'Pfand' : k === 'deposit_return' ? 'Leergut' : ''),
     };
@@ -1556,7 +1559,7 @@ ${receiptRow('state.receipts', true)}
                 <td v-for="pid in summary.personIds" :key="pid" class="num">{{ fmt(row.sharedPer[pid]) }}</td>
               </tr>
               <tr class="cat-total">
-                <td>{{ row.name }} gesamt<div v-if="showNames(row)" class="cat-items">({{ row.itemNames.join(', ') }})</div></td>
+                <td>{{ row.name }} gesamt<ul v-if="showNames(row)" class="cat-items"><li v-for="(e, i) in row.itemList" :key="i"><span class="ci-name">{{ itemLabel(e) }}</span><span class="ci-price">{{ fmt(e.cents) }}</span></li></ul></td>
                 <td v-for="pid in summary.personIds" :key="pid" class="num">{{ fmt(row.single[pid] + row.sharedPer[pid]) }}</td>
               </tr>
             </template>
@@ -1604,7 +1607,7 @@ ${receiptRow('state.receipts', true)}
                 <td v-for="pid in month.personIds" :key="pid" class="num">{{ fmt(row.sharedPer[pid]) }}</td>
               </tr>
               <tr class="cat-total">
-                <td>{{ row.name }} gesamt<div v-if="showNames(row)" class="cat-items">({{ row.itemNames.join(', ') }})</div></td>
+                <td>{{ row.name }} gesamt<ul v-if="showNames(row)" class="cat-items"><li v-for="(e, i) in row.itemList" :key="i"><span class="ci-name">{{ itemLabel(e) }}</span><span class="ci-price">{{ fmt(e.cents) }}</span></li></ul></td>
                 <td v-for="pid in month.personIds" :key="pid" class="num">{{ fmt(row.single[pid] + row.sharedPer[pid]) }}</td>
               </tr>
             </template>

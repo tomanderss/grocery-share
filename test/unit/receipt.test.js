@@ -4,7 +4,7 @@ import {
   toCents, formatCents, evenSplit, isEvenSplit, normalizeSplit, proportionalSplit, rebalanceSplit,
   splitAmount, effectiveItem, receiptSummary, itemsTotal, monthSummary, receiptMonth,
   receiptPersonIds, defaultParticipantIds, reassignSplits, splitEvenly, unbookedCount,
-  payerId, paidTotals, moveReceipt,
+  payerId, paidTotals, moveReceipt, mergeItemList,
   grossCents, vatTotals, VAT_RATES, itemGrossCents,
 } from '../../js/receipt.js';
 
@@ -155,6 +155,12 @@ describe('receiptSummary — das Beispiel aus der Spezifikation', () => {
     const s = receiptSummary(r, SETTINGS);
     const row = s.rows.find((x) => x.categoryId === 'sonstiges');
     assert.deepEqual(row.itemNames, ['Blume', 'Geschenk']);
+    // je Position eine Zeile mit Gesamtpreis (nicht dedupliziert, nicht je Person)
+    assert.deepEqual(row.itemList, [
+      { name: 'Blume', cents: 100, count: 1 },
+      { name: 'Geschenk', cents: 100, count: 1 },
+      { name: 'Blume', cents: 100, count: 1 },
+    ]);
     // Kategorie-Zwischensumme = einzeln + teilen je Person
     assert.equal(row.single.p1 + row.sharedPer.p1 + row.single.p2 + row.sharedPer.p2, row.total);
   });
@@ -598,5 +604,21 @@ describe('moveReceipt (Verlauf umsortieren)', () => {
     assert.equal(moveReceipt(L, 'b', 1), L);
     assert.equal(moveReceipt(L, 'x', 0), L);
     assert.deepEqual(moveReceipt(L, 'a', 99).map((r) => r.id), ['b', 'c', 'a']);
+  });
+});
+
+describe('Artikelliste mit Preisen (Sonstiges)', () => {
+  test('mergeItemList fasst gleichnamige Artikel zusammen', () => {
+    assert.deepEqual(mergeItemList([
+      { name: 'Blume', cents: 349, count: 1 }, { name: 'Karte', cents: 199, count: 1 }, { name: 'blume', cents: 349, count: 1 },
+    ]), [{ name: 'Blume', cents: 698, count: 2 }, { name: 'Karte', cents: 199, count: 1 }]);
+  });
+
+  test('Monat: Liste über alle Bons, gleichnamige zusammengefasst, Netto-Bon brutto', () => {
+    const bon = (id, extra = {}) => ({ id, status: 'final', date: '2026-05-0' + id,
+      items: [item({ name: 'Blume', categoryId: 'sonstiges', priceCents: 300 })], ...extra });
+    const m = monthSummary([bon('1'), bon('2', { netPrices: true, items: [item({ name: 'Vase', categoryId: 'sonstiges', priceCents: 1000, vatRate: 19 })] }), bon('3')], SETTINGS, '2026-05');
+    const row = m.rows.find((r) => r.categoryId === 'sonstiges');
+    assert.deepEqual(row.itemList, [{ name: 'Blume', cents: 600, count: 2 }, { name: 'Vase', cents: 1190, count: 1 }]);
   });
 });

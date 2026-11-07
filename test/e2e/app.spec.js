@@ -86,7 +86,8 @@ test.describe('Bon-Workflow (manuell)', () => {
     await page.locator('.review-actions .btn-primary').click();
     await page.waitForSelector('.screen.summary');
     await expect(page.locator('.sum-table')).toContainText('Sonstiges gesamt');
-    await expect(page.locator('.cat-items')).toContainText('Blumenstrauß');
+    await expect(page.locator('.cat-items li').first()).toContainText('Blumenstrauß');
+    await expect(page.locator('.cat-items li').first().locator('.ci-price')).toHaveText('4,99 €');
   });
 
   test('Verwerfen stellt den Bon beim Bearbeiten unverändert wieder her', async ({ page }) => {

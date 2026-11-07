@@ -1,0 +1,1 @@
+- Sonstiges: unter „Sonstiges gesamt" steht jetzt jeder Artikel in einer eigenen kleinen Zeile mit seinem Gesamtpreis; in der Monatsübersicht werden gleiche Artikel zusammengefasst (z. B. „2× Blume").
