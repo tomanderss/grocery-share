@@ -1,8 +1,15 @@
 // Auto-generiert von build.js — nicht manuell bearbeiten!
-export const BUILD      = '0.28';
-export const BUILD_HASH = 'a913cd5';
+export const BUILD      = '0.29';
+export const BUILD_HASH = '65607e5';
 
 export const CHANGELOG = [
+  {
+    "version": "0.29",
+    "date": "07.11.2026",
+    "changes": [
+      "- Sonstiges: unter „Sonstiges gesamt\" steht jetzt jeder Artikel in einer eigenen kleinen Zeile mit seinem Gesamtpreis; in der Monatsübersicht werden gleiche Artikel zusammengefasst (z. B. „2× Blume\")."
+    ]
+  },
   {
     "version": "0.28",
     "date": "07.11.2026",
