@@ -110,17 +110,28 @@ label { display: flex; flex-direction: column; gap: 4px; font-size: .76rem; colo
 .receipt-list { display: flex; flex-direction: column; gap: 10px; }
 /* Verlauf-Button direkt unter der Liste: gleicher Abstand wie zwischen den Pillen. */
 .receipt-list + .btn.wide { margin-top: 10px; }
-.receipt-row { display: flex; align-items: center; gap: 12px; width: 100%; border: 0; cursor: pointer; text-align: left;
+.receipt-row { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; cursor: pointer; text-align: left;
   font-family: inherit; color: var(--text); }
 .rr-main { flex: 1; min-width: 0; }
-.rr-store { font-weight: 800; font-size: .98rem; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* Bon-Zeile: feste Spalten, jede Zeile genau zwei Textzeilen hoch, nichts bricht
+   um. Links Name + Chips / Datum · Positionen, rechts eine fest breite Spalte
+   Betrag / KI-Kosten — dadurch stehen die Werte aller Pillen bündig. */
+.rr-store { font-weight: 800; font-size: .98rem; display: flex; align-items: center; gap: 6px;
+  white-space: nowrap; min-width: 0; }
+.rr-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.rr-draft { color: var(--warn); font-weight: 700; }
+.rr-payer { flex: none; width: 52px; justify-content: center; padding-left: 0; padding-right: 0; }
 /* Zahler-Chip: reine Information, deshalb bewusst leise — der Bon-Name führt. */
 .chip-payer { flex: none; background: var(--grid); color: var(--text3); font-weight: 600; }
 .chip-payer svg { opacity: .75; }
-.rr-date { color: var(--text3); font-size: .8rem; margin-top: 2px; }
-/* Zeilen nur ZWISCHEN den Teilen umbrechen — nie „15,4 | ¢" */
-.rr-date .nw { white-space: nowrap; }
+.rr-date { color: var(--text3); font-size: .8rem; margin-top: 3px; white-space: nowrap;
+  font-variant-numeric: tabular-nums; }
+.rr-side { flex: none; width: 84px; text-align: right; white-space: nowrap; }
 .rr-total { font-weight: 800; font-variant-numeric: tabular-nums; }
+.rr-side .rr-api { margin-top: 3px; font-variant-numeric: tabular-nums; }
+.rr-grip { flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 40px; margin-left: -4px; color: var(--text3); cursor: grab; touch-action: none; }
+.receipt-row.dragging { opacity: .85; box-shadow: 0 6px 22px var(--shadow); outline: 1.5px solid var(--accent); }
 
 /* ── Review ── */
 .review-meta { display: flex; flex-direction: column; gap: 9px; margin-bottom: 10px; }
@@ -132,6 +143,7 @@ label { display: flex; flex-direction: column; gap: 4px; font-size: .76rem; colo
 .ai-note { display: flex; gap: 7px; align-items: flex-start; font-size: .76rem; line-height: 1.35; color: var(--text2);
   background: var(--bg2); border-radius: 10px; padding: 9px 11px; }
 .ai-note.warn { color: var(--warn); background: var(--warn-soft); }
+.input-warn { border-color: var(--warn) !important; }
 
 .item-list { display: flex; flex-direction: column; gap: 10px; }
 /* Positionskarte: Name oben in voller Breite (umbrechend, damit lange
@@ -325,7 +337,7 @@ label { display: flex; flex-direction: column; gap: 4px; font-size: .76rem; colo
 .receipt-row { padding-right: 8px; }
 .receipt-row.booked { border-left: 3px solid var(--good); }
 .receipt-row.unbooked { border-left: 3px solid var(--bad); }
-.rr-open { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0;
+.rr-open { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;
   border: 0; background: none; padding: 0; cursor: pointer; text-align: left;
   font-family: inherit; color: inherit; }
 .rr-book { flex: none; width: 30px; height: 30px; border-radius: 50%; cursor: pointer;

@@ -12,7 +12,7 @@ import {
 } from './storage.js';
 import {
   formatCents, toCents, evenSplit, normalizeSplit, isEvenSplit, proportionalSplit, rebalanceSplit,
-  receiptSummary, monthSummary, itemsTotal, receiptMonth,
+  receiptSummary, monthSummary, itemsTotal, receiptMonth, moveReceipt,
   receiptPersonIds, defaultParticipantIds, reassignSplits, unbookedCount, payerId, paidTotals,
   VAT_RATES, grossCents, vatTotals, itemGrossCents,
 } from './receipt.js';
@@ -53,6 +53,7 @@ const state = reactive({
   build: BUILD,
   changelog: CHANGELOG,
   monthKey: new Date().toISOString().slice(0, 7),
+  dragId: null, // Bon, der gerade im Verlauf gezogen wird
   currentId: null,
   analyzing: false,
   analyzeError: '',
@@ -151,11 +152,13 @@ function currentReceipt() {
   return state.receipts.find((r) => r.id === state.currentId) || null;
 }
 
-function newDraft({ store = '', date = '', totalCents = 0, items = [], notes = '', apiCost = null, participantIds = null, netPrices = false, paidBy = null } = {}) {
+function newDraft({ store = '', date = '', dateMissing = false, totalCents = 0, items = [], notes = '', apiCost = null, participantIds = null, netPrices = false, paidBy = null } = {}) {
   const r = {
     id: newId('bon'),
     store,
     date: date || new Date().toISOString().slice(0, 10),
+    // true = Kaufdatum war auf dem Bon nicht lesbar, „heute" ist nur ein Platzhalter
+    ...(dateMissing ? { dateMissing: true } : {}),
     createdAt: Date.now(),
     status: 'draft',
     totalCents,
@@ -225,6 +228,13 @@ function deleteReceipt(r) {
 // ── Eigene Buchhaltung ──────────────────────────────────────────────────────
 // Reiner Merker: „habe ich diesen Bon schon in mein Ausgaben-System übertragen?"
 // Wird nirgends verrechnet, steuert nur die Markierung in den Bon-Listen.
+// Datum von Hand gesetzt → der „nicht erkennbar"-Hinweis hat sich erledigt.
+function onDateInput() {
+  const r = currentReceipt();
+  if (r) delete r.dateMissing;
+  persistReceipts();
+}
+
 function toggleBooked(r) {
   r.booked = !r.booked;
   if (r.booked) r.bookedAt = Date.now(); else delete r.bookedAt;
@@ -829,9 +839,13 @@ function itemsFromAnalysis(result, pids = defaultParticipantIds(state.settings))
 }
 
 function buildDraftFromAnalysis(result, usage = null) {
+  const dateOk = /^\d{4}-\d{2}-\d{2}$/.test(result.date || '');
+  if (!dateOk) log('bon', 'date missing on receipt, using today');
   return newDraft({
     store: result.store || '',
-    date: /^\d{4}-\d{2}-\d{2}$/.test(result.date || '') ? result.date : new Date().toISOString().slice(0, 10),
+    date: dateOk ? result.date : new Date().toISOString().slice(0, 10),
+    // Datum nicht auf dem Bon erkennbar → heute eingetragen, Review weist darauf hin
+    dateMissing: !dateOk,
     totalCents: toCents(result.total),
     notes: result.notes || '',
     netPrices: !!result.netPrices, // Großhandels-Bon: Preise sind netto
@@ -859,6 +873,12 @@ function shiftMonth(delta) {
 function monthLabel(key) {
   const [y, m] = key.split('-').map(Number);
   return new Date(y, m - 1, 1).toLocaleDateString('de-DE', { month: 'long', year: 'numeric' });
+}
+
+// Kurzform für die Bon-Zeilen (06.11.26) — hält die Spalten schmal und fest.
+function formatDateShort(iso) {
+  const full = formatDate(iso);
+  return /^\d{2}\.\d{2}\.\d{4}$/.test(full) ? full.slice(0, 6) + full.slice(8) : full;
 }
 
 function formatDate(iso) {
@@ -1198,6 +1218,65 @@ function maybeShowWhatsNew() {
   localStorage.setItem(seenKey, BUILD);
 }
 
+// ── Bon-Zeile (Startseite, Verlauf, Monat) ───────────────────────────────────
+// Feste Spalten, immer zweizeilig, nie umbrechend: Name / Datum · Positionen
+// (bei Entwürfen „Entwurf") | Zahler-Chip | fest breit Betrag / KI-Kosten (Platzhalter, wenn
+// keine) — alle Pillen gleich hoch, die Werte stehen bündig untereinander.
+// Mit drag=true bekommt die Zeile links einen Griff zum Umsortieren.
+function receiptRow(src, drag) {
+  return `
+        <div v-for="r in ${src}" :key="r.id" class="receipt-row card"
+             :class="[r.booked ? 'booked' : 'unbooked', { dragging: state.dragId === r.id }]" :data-id="r.id">
+          ${drag ? `<span class="rr-grip" title="Ziehen zum Umsortieren" aria-label="Ziehen zum Umsortieren"
+                @pointerdown="startDrag($event, r)" v-html="ic('grip', 18)"></span>` : ''}
+          <button class="rr-open" @click="openReceipt(r)">
+            <div class="rr-main">
+              <div class="rr-store"><span class="rr-name">{{ r.store || 'Ohne Namen' }}</span></div>
+              <div class="rr-date">{{ formatDateShort(r.date) }} · <span v-if="r.status === 'draft'" class="rr-draft">Entwurf</span><template v-else>{{ r.items.length }} Pos.</template></div>
+            </div>
+            <span class="chip chip-payer rr-payer" :title="'Bezahlt von ' + payerName(r)"><span v-html="ic('wallet', 12)"></span>{{ payerName(r) }}</span>
+            <div class="rr-side">
+              <div class="rr-total">{{ fmt(r.totalCents || summaryFor(r).grandTotal) }}</div>
+              <div class="rr-api">{{ r.apiCost ? 'KI ' + apiCost(r.apiCost.usd) : ' ' }}</div>
+            </div>
+          </button>
+          <button class="rr-book" :class="{ on: r.booked }" @click="toggleBooked(r)"
+                  :title="bookedLabel(r)" :aria-label="bookedLabel(r)" v-html="ic('check', 15)"></button>
+        </div>`;
+}
+
+// ── Verlauf per Drag & Drop umsortieren ─────────────────────────────────────
+// Pointer-Events statt HTML5-DnD (das kann iOS-Safari per Touch nicht). Der Griff
+// fängt den Pointer; beim Bewegen wird live umsortiert (Ziel = Anzahl der übrigen
+// Zeilen, deren Mitte über dem Finger liegt), am Rand scrollt die Seite mit.
+function startDrag(e, r) {
+  e.preventDefault();
+  const grip = e.currentTarget;
+  grip.setPointerCapture?.(e.pointerId);
+  state.dragId = r.id;
+  const list = grip.closest('.receipt-list');
+  const onMove = (ev) => {
+    const y = ev.clientY;
+    if (y < 70) window.scrollBy(0, -14);
+    else if (y > window.innerHeight - 70) window.scrollBy(0, 14);
+    const rows = [...list.querySelectorAll('.receipt-row')].filter((el) => el.dataset.id !== r.id);
+    const to = rows.filter((el) => { const b = el.getBoundingClientRect(); return b.top + b.height / 2 < y; }).length;
+    const next = moveReceipt(state.receipts, r.id, to);
+    if (next !== state.receipts) state.receipts = next;
+  };
+  const onUp = () => {
+    grip.removeEventListener('pointermove', onMove);
+    grip.removeEventListener('pointerup', onUp);
+    grip.removeEventListener('pointercancel', onUp);
+    state.dragId = null;
+    persistReceipts();
+    log('bon', 'order changed by drag');
+  };
+  grip.addEventListener('pointermove', onMove);
+  grip.addEventListener('pointerup', onUp);
+  grip.addEventListener('pointercancel', onUp);
+}
+
 // ── App ───────────────────────────────────────────────────────────────────────
 const app = createApp({
   setup() {
@@ -1232,12 +1311,12 @@ const app = createApp({
       receipt, summary, month, monthReceipts, monthPaid, totalsDiff, reviewCount, sortedRules,
       creditLeft, bonsLeft, apiCost,
       ic: (name, size) => icon(name, { size }),
-      fmt, personName, categoryName, formatDate, monthLabel, formatCost, formatUsd, totalApiCostUsd,
+      fmt, personName, categoryName, formatDate, formatDateShort, monthLabel, formatCost, formatUsd, totalApiCostUsd,
       costFactor: () => costFactor(state.credit),
       setCreditAnchor, correctCredit, resetCostFactor,
       personIds,
       go: (screen) => { state.screen = screen; if (screen === 'chat') queueMicrotask(scrollChat); },
-      addManualReceipt, onFilePicked, confirmAnalyze, openReceipt, deleteReceipt,
+      addManualReceipt, onFilePicked, confirmAnalyze, openReceipt, deleteReceipt, startDrag, onDateInput,
       openOriginals, openPdf,
       addItem, removeItem, onPriceInput, onNameInput, onTotalInput, setQuickSplit, splitMode, splitLabel,
       applySplitEditor, editorResult, onSplitSlider, toggleLock, setKind, pickCategory, hasBadges, DEPOSIT_PICK, finalizeReceipt, reopenReceipt, discardChanges,
@@ -1323,17 +1402,7 @@ const app = createApp({
         <span v-else class="section-note ok">alle eingetragen</span>
       </h2>
       <div class="receipt-list">
-        <div v-for="r in state.receipts.slice(0, HOME_RECEIPTS)" :key="r.id" class="receipt-row card" :class="r.booked ? 'booked' : 'unbooked'">
-          <button class="rr-open" @click="openReceipt(r)">
-            <div class="rr-main">
-              <div class="rr-store">{{ r.store || 'Ohne Namen' }} <span v-if="r.status === 'draft'" class="chip chip-warn">Entwurf</span><span class="chip chip-payer" :title="'Bezahlt von ' + payerName(r)"><span v-html="ic('wallet', 12)"></span>{{ payerName(r) }}</span></div>
-              <div class="rr-date"><span class="nw">{{ formatDate(r.date) }}</span> · <span class="nw">{{ r.items.length }} Positionen</span><template v-if="r.apiCost"> · <span class="rr-api nw">KI {{ apiCost(r.apiCost.usd) }}</span></template></div>
-            </div>
-            <div class="rr-total">{{ fmt(r.totalCents || summaryFor(r).grandTotal) }}</div>
-          </button>
-          <button class="rr-book" :class="{ on: r.booked }" @click="toggleBooked(r)"
-                  :title="bookedLabel(r)" :aria-label="bookedLabel(r)" v-html="ic('check', 15)"></button>
-        </div>
+${receiptRow('state.receipts.slice(0, HOME_RECEIPTS)', false)}
       </div>
       <button v-if="state.receipts.length > HOME_RECEIPTS" class="btn btn-ghost wide" @click="go('history')">
         <span v-html="ic('receipt', 18)"></span> Ganzer Verlauf ({{ state.receipts.length }} Bons)
@@ -1348,17 +1417,7 @@ const app = createApp({
     <!-- ═══ VERLAUF (alle Bons) ═══ -->
     <main v-else-if="state.screen === 'history'" class="screen history">
       <div class="receipt-list">
-        <div v-for="r in state.receipts" :key="r.id" class="receipt-row card" :class="r.booked ? 'booked' : 'unbooked'">
-          <button class="rr-open" @click="openReceipt(r)">
-            <div class="rr-main">
-              <div class="rr-store">{{ r.store || 'Ohne Namen' }} <span v-if="r.status === 'draft'" class="chip chip-warn">Entwurf</span><span class="chip chip-payer" :title="'Bezahlt von ' + payerName(r)"><span v-html="ic('wallet', 12)"></span>{{ payerName(r) }}</span></div>
-              <div class="rr-date"><span class="nw">{{ formatDate(r.date) }}</span> · <span class="nw">{{ r.items.length }} Positionen</span><template v-if="r.apiCost"> · <span class="rr-api nw">KI {{ apiCost(r.apiCost.usd) }}</span></template></div>
-            </div>
-            <div class="rr-total">{{ fmt(r.totalCents || summaryFor(r).grandTotal) }}</div>
-          </button>
-          <button class="rr-book" :class="{ on: r.booked }" @click="toggleBooked(r)"
-                  :title="bookedLabel(r)" :aria-label="bookedLabel(r)" v-html="ic('check', 15)"></button>
-        </div>
+${receiptRow('state.receipts', true)}
       </div>
       <div v-if="!state.receipts.length" class="empty-hint">Noch keine Bons. Fotografier den ersten! 🧾</div>
     </main>
@@ -1368,7 +1427,7 @@ const app = createApp({
       <div class="card review-meta">
         <div class="meta-row">
           <label>Geschäft<input v-model="receipt.store" @change="persistReceipts" placeholder="z.B. REWE"></label>
-          <label>Datum<input type="date" v-model="receipt.date" @change="persistReceipts"></label>
+          <label>Datum<input type="date" v-model="receipt.date" :class="{ 'input-warn': receipt.dateMissing }" @change="onDateInput"></label>
         </div>
         <div class="meta-row">
           <label>Bon-Gesamtbetrag
@@ -1406,6 +1465,7 @@ const app = createApp({
           <span v-html="ic('receipt', 18)"></span> Original ansehen ({{ receipt.attachmentCount }})
         </button>
         <div v-if="receipt.notes" class="ai-note"><span v-html="ic('info', 16)"></span> {{ receipt.notes }}</div>
+        <div v-if="receipt.dateMissing" class="ai-note warn date-missing"><span v-html="ic('warn', 16)"></span> Kaufdatum auf dem Bon nicht erkennbar — heutiges Datum eingetragen. Bitte prüfen.</div>
         <div v-if="reviewCount" class="ai-note warn"><span v-html="ic('warn', 16)"></span> {{ reviewCount }} Position(en) ohne klare Zuordnung — bitte unten prüfen.</div>
       </div>
 
@@ -1564,17 +1624,7 @@ const app = createApp({
 
       <h2 class="section-title" v-if="monthReceipts.length">Bons im {{ monthLabel(state.monthKey) }}</h2>
       <div class="receipt-list">
-        <div v-for="r in monthReceipts" :key="r.id" class="receipt-row card" :class="r.booked ? 'booked' : 'unbooked'">
-          <button class="rr-open" @click="openReceipt(r)">
-            <div class="rr-main">
-              <div class="rr-store">{{ r.store || 'Ohne Namen' }} <span v-if="r.status === 'draft'" class="chip chip-warn">Entwurf</span><span class="chip chip-payer" :title="'Bezahlt von ' + payerName(r)"><span v-html="ic('wallet', 12)"></span>{{ payerName(r) }}</span></div>
-              <div class="rr-date"><span class="nw">{{ formatDate(r.date) }}</span><template v-if="r.apiCost"> · <span class="rr-api nw">KI {{ apiCost(r.apiCost.usd) }}</span></template></div>
-            </div>
-            <div class="rr-total">{{ fmt(r.totalCents || summaryFor(r).grandTotal) }}</div>
-          </button>
-          <button class="rr-book" :class="{ on: r.booked }" @click="toggleBooked(r)"
-                  :title="bookedLabel(r)" :aria-label="bookedLabel(r)" v-html="ic('check', 15)"></button>
-        </div>
+${receiptRow('monthReceipts', false)}
       </div>
     </main>
 
