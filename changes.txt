@@ -1,3 +1,0 @@
-- Neu: Ist auf dem Bon kein Kaufdatum zu erkennen, trägt die App das heutige Datum ein und zeigt im Bon einen gelben Hinweis, bis du das Datum prüfst bzw. änderst.
-- Neu: Im ganzen Verlauf lässt sich die Reihenfolge der Bons über den Griff links per Ziehen ändern.
-- Bon-Listen mit festen Spalten: alle Zeilen sind gleich hoch, Betrag und KI-Kosten stehen rechts bündig untereinander, der Zahler in einer eigenen Spalte – nichts bricht mehr um.
