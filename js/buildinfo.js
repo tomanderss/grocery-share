@@ -1,8 +1,16 @@
 // Auto-generiert von build.js — nicht manuell bearbeiten!
-export const BUILD      = '0.29';
-export const BUILD_HASH = '65607e5';
+export const BUILD      = '0.30';
+export const BUILD_HASH = '2a9beb6';
 
 export const CHANGELOG = [
+  {
+    "version": "0.30",
+    "date": "23.11.2026",
+    "changes": [
+      "- Behoben: Eine später angelegte Person, die „immer\" dabei ist, ließ sich an ältere Bons nicht anhängen. Über „Dabei:\" lässt sich jetzt an jedem Bon jede Person zu- oder abwählen.",
+      "- Neu: Die Reihenfolge der Personen lässt sich in den Einstellungen per Griff verschieben – sie bestimmt die Spaltenreihenfolge in allen Tabellen."
+    ]
+  },
   {
     "version": "0.29",
     "date": "07.11.2026",
