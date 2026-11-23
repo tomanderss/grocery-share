@@ -4,7 +4,7 @@ import {
   toCents, formatCents, evenSplit, isEvenSplit, normalizeSplit, proportionalSplit, rebalanceSplit,
   splitAmount, effectiveItem, receiptSummary, itemsTotal, monthSummary, receiptMonth,
   receiptPersonIds, defaultParticipantIds, reassignSplits, splitEvenly, unbookedCount,
-  payerId, paidTotals, moveReceipt, mergeItemList,
+  payerId, paidTotals, moveReceipt, moveById, mergeItemList,
   grossCents, vatTotals, VAT_RATES, itemGrossCents,
 } from '../../js/receipt.js';
 
@@ -599,6 +599,10 @@ describe('moveReceipt (Verlauf umsortieren)', () => {
     assert.deepEqual(moveReceipt(L, 'a', 2).map((r) => r.id), ['b', 'c', 'a']);
     assert.deepEqual(moveReceipt(L, 'c', 0).map((r) => r.id), ['c', 'a', 'b']);
     assert.deepEqual(L.map((r) => r.id), ['a', 'b', 'c']);
+  });
+  test('moveById ist dieselbe Logik (auch für Personen)', () => {
+    assert.equal(moveById, moveReceipt);
+    assert.deepEqual(moveById([{ id: 'p1' }, { id: 'p2' }], 'p1', 1).map((p) => p.id), ['p2', 'p1']);
   });
   test('gleiche Position / unbekannte ID → dieselbe Liste', () => {
     assert.equal(moveReceipt(L, 'b', 1), L);

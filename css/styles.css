@@ -263,6 +263,9 @@ label { display: flex; flex-direction: column; gap: 4px; font-size: .76rem; colo
 .acc.open .acc-arrow { transform: rotate(90deg); }
 .acc-body { display: flex; flex-direction: column; gap: 13px; padding: 2px 16px 16px; }
 .cat-row { display: flex; gap: 8px; align-items: center; }
+.person-list { display: flex; flex-direction: column; gap: 8px; }
+.person-row .rr-grip { height: 34px; }
+.person-row.dragging { opacity: .85; }
 .credit-block { display: flex; flex-direction: column; gap: 10px; border-top: 1px solid var(--grid); padding-top: 13px; }
 .credit-head { font-weight: 800; font-size: .9rem; }
 .credit-status { font-size: .9rem; }
@@ -314,7 +317,6 @@ label { display: flex; flex-direction: column; gap: 4px; font-size: .76rem; colo
 .who-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .who-label { font-size: .85rem; color: var(--text2); font-weight: 700; }
 .chip-btn.active { border-style: solid; border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
-.chip-btn.fixed:disabled { opacity: 1; cursor: default; }
 .who-toggle { flex: none; }
 
 /* Netto-Bons: Steuersatz direkt im Chip wählbar, damit die Position-Pill
