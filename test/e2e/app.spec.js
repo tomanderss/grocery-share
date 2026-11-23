@@ -537,6 +537,53 @@ test.describe('Gäste', () => {
     await seedReceipt(page, { store: 'REWE', items: [item()] });
     await expect(page.locator('.split-btns button')).toHaveCount(5);
   });
+
+  test('später fest angelegte Person lässt sich an einen alten Bon hängen', async ({ page }) => {
+    await gotoApp(page);
+    // alter Bon: nur Tom & Tara beteiligt, schon abgeschlossen
+    await seedReceipt(page, { store: 'ALT', items: [item({ priceCents: 900, priceInput: '9,00' })] });
+    await page.evaluate(() => { window.__gs.state.receipts[0].status = 'final'; window.__gs.state.screen = 'home'; });
+    // neue Person, sofort auf „immer"
+    await addGuest(page);
+    await page.evaluate(() => { delete window.__gs.state.settings.persons[2].optional; });
+    // alter Bon bleibt unverändert …
+    await page.evaluate(() => { window.__gs.state.currentId = window.__gs.state.receipts[0].id; window.__gs.state.screen = 'review'; });
+    await page.waitForSelector('.screen.review');
+    await expect(page.locator('.split-btns button')).toHaveCount(4);
+    // … aber die feste Person ist über „Dabei:" zuschaltbar
+    const chip = page.locator('.who-row.guest-row .chip-btn', { hasText: 'Tjure' });
+    await expect(chip).toBeEnabled();
+    await expect(chip).toContainText('+ Tjure');
+    await chip.click();
+    await expect(page.locator('.split-btns button')).toHaveCount(5);
+    // und eine feste Person lässt sich an einem Bon auch abwählen
+    await page.locator('.who-row.guest-row .chip-btn', { hasText: 'Tara' }).click();
+    await expect(page.locator('.split-btns button')).toHaveCount(4);
+  });
+
+  test('Personen per Griff umsortieren ändert die Spaltenreihenfolge', async ({ page }) => {
+    await gotoApp(page);
+    // Altbestand ohne gespeicherten Zahler → Zahler darf sich durchs Umsortieren nicht ändern
+    await page.evaluate(() => { const r = window.__gs.newDraft({ store: 'ALT' }); delete r.paidBy; });
+    await page.locator('.home-head .iconbtn').click();
+    await page.locator('.acc-head', { hasText: 'Personen' }).click();
+    const grips = page.locator('.person-row .rr-grip');
+    const g = await grips.nth(0).boundingBox();
+    const t = await page.locator('.person-row').nth(1).boundingBox();
+    await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(g.x + g.width / 2, t.y + t.height - 2, { steps: 6 });
+    await page.mouse.up();
+    await expect.poll(() => page.evaluate(() => window.__gs.state.settings.persons.map((p) => p.name))).toEqual(['Tara', 'Tom']);
+    const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('gs_settings')).persons.map((p) => p.name));
+    expect(stored).toEqual(['Tara', 'Tom']);
+    expect(await page.evaluate(() => window.__gs.state.receipts.find((r) => r.store === 'ALT').paidBy)).toBe('p1');
+    await page.locator('.topbar .iconbtn').click();
+    await seedReceipt(page, { store: 'REWE', items: [item()] });
+    await page.locator('.review-actions .btn-primary').click();
+    await page.waitForSelector('.screen.summary');
+    await expect(page.locator('.sum-table thead th').nth(1)).toHaveText(/Tara/i);
+  });
 });
 
 test.describe('Netto-Bons (MwSt. aufschlagen)', () => {

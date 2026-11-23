@@ -12,7 +12,7 @@ import {
 } from './storage.js';
 import {
   formatCents, toCents, evenSplit, normalizeSplit, isEvenSplit, proportionalSplit, rebalanceSplit,
-  receiptSummary, monthSummary, itemsTotal, receiptMonth, moveReceipt,
+  receiptSummary, monthSummary, itemsTotal, receiptMonth, moveById,
   receiptPersonIds, defaultParticipantIds, reassignSplits, unbookedCount, payerId, paidTotals,
   VAT_RATES, grossCents, vatTotals, itemGrossCents,
 } from './receipt.js';
@@ -565,11 +565,6 @@ function addPerson() {
   toast(`${name} angelegt — als Gast. Pro Bon mit „+ ${name}" dazuschalten.`);
 }
 
-// Alle als Gast geführten Personen (steuert, ob die „Dabei:"-Zeile erscheint).
-function guestPersons() {
-  return state.settings.persons.filter((p) => p.optional);
-}
-
 // Gast ⇄ feste Besetzung. Fest heißt: ab sofort bei jedem neuen Bon dabei.
 function togglePersonFixed(p) {
   if (!p.optional && state.settings.persons.filter((x) => !x.optional).length <= 2) {
@@ -581,7 +576,8 @@ function togglePersonFixed(p) {
   toast(p.optional ? `${p.name} ist jetzt Gast` : `${p.name} ist jetzt immer dabei`);
 }
 
-// Gast für den offenen Bon dazuschalten oder wieder abwählen. Gleichmäßig
+// Person (Gast ODER fest) für den offenen Bon dazuschalten oder abwählen — so
+// lässt sich eine später angelegte feste Person auch an ältere Bons hängen. Gleichmäßig
 // geteilte Positionen werden dabei auf die neue Runde umgelegt.
 function toggleParticipant(pid) {
   const r = currentReceipt();
@@ -1252,32 +1248,64 @@ function receiptRow(src, drag) {
 // Pointer-Events statt HTML5-DnD (das kann iOS-Safari per Touch nicht). Der Griff
 // fängt den Pointer; beim Bewegen wird live umsortiert (Ziel = Anzahl der übrigen
 // Zeilen, deren Mitte über dem Finger liegt), am Rand scrollt die Seite mit.
-function startDrag(e, r) {
+// Generisches Umsortieren per Griff: `rowSel` sind die Zeilen im nächsten
+// `listSel`-Container (jede mit data-id), get/set lesen/schreiben die Liste.
+function dragReorder(e, id, { listSel, rowSel, get, set, done }) {
   e.preventDefault();
   const grip = e.currentTarget;
   grip.setPointerCapture?.(e.pointerId);
-  state.dragId = r.id;
-  const list = grip.closest('.receipt-list');
+  state.dragId = id;
+  const list = grip.closest(listSel);
   const onMove = (ev) => {
     const y = ev.clientY;
     if (y < 70) window.scrollBy(0, -14);
     else if (y > window.innerHeight - 70) window.scrollBy(0, 14);
-    const rows = [...list.querySelectorAll('.receipt-row')].filter((el) => el.dataset.id !== r.id);
+    const rows = [...list.querySelectorAll(rowSel)].filter((el) => el.dataset.id !== id);
     const to = rows.filter((el) => { const b = el.getBoundingClientRect(); return b.top + b.height / 2 < y; }).length;
-    const next = moveReceipt(state.receipts, r.id, to);
-    if (next !== state.receipts) state.receipts = next;
+    const cur = get();
+    const next = moveById(cur, id, to);
+    if (next !== cur) set(next);
   };
   const onUp = () => {
     grip.removeEventListener('pointermove', onMove);
     grip.removeEventListener('pointerup', onUp);
     grip.removeEventListener('pointercancel', onUp);
     state.dragId = null;
-    persistReceipts();
-    log('bon', 'order changed by drag');
+    done();
   };
   grip.addEventListener('pointermove', onMove);
   grip.addEventListener('pointerup', onUp);
   grip.addEventListener('pointercancel', onUp);
+}
+
+function startDrag(e, r) {
+  dragReorder(e, r.id, {
+    listSel: '.receipt-list', rowSel: '.receipt-row',
+    get: () => state.receipts, set: (v) => { state.receipts = v; },
+    done: () => { persistReceipts(); log('bon', 'order changed by drag'); },
+  });
+}
+
+// Personen-Reihenfolge = Spaltenreihenfolge in allen Tabellen (und Reihenfolge
+// der Chips im Review).
+function startPersonDrag(e, p) {
+  // Bons ohne gespeicherten Zahler zeigen die ERSTE Person als Zahler. Damit das
+  // Umsortieren dort nicht still den Zahler wechselt, wird er vorher festgeschrieben.
+  const firstBefore = state.settings.persons[0]?.id;
+  dragReorder(e, p.id, {
+    listSel: '.person-list', rowSel: '.person-row',
+    get: () => state.settings.persons, set: (v) => { state.settings.persons = v; },
+    done: () => {
+      if (state.settings.persons[0]?.id !== firstBefore) {
+        const all = state.settings.persons.map((x) => x.id);
+        let pinned = 0;
+        state.receipts.forEach((r) => { if (!all.includes(r.paidBy)) { r.paidBy = firstBefore; pinned++; } });
+        if (pinned) persistReceipts();
+      }
+      persistSettings();
+      log('app', 'person order changed');
+    },
+  });
 }
 
 // ── App ───────────────────────────────────────────────────────────────────────
@@ -1319,7 +1347,7 @@ const app = createApp({
       setCreditAnchor, correctCredit, resetCostFactor,
       personIds,
       go: (screen) => { state.screen = screen; if (screen === 'chat') queueMicrotask(scrollChat); },
-      addManualReceipt, onFilePicked, confirmAnalyze, openReceipt, deleteReceipt, startDrag, onDateInput,
+      addManualReceipt, onFilePicked, confirmAnalyze, openReceipt, deleteReceipt, startDrag, startPersonDrag, onDateInput,
       openOriginals, openPdf,
       addItem, removeItem, onPriceInput, onNameInput, onTotalInput, setQuickSplit, splitMode, splitLabel,
       applySplitEditor, editorResult, onSplitSlider, toggleLock, setKind, pickCategory, hasBadges, DEPOSIT_PICK, finalizeReceipt, reopenReceipt, discardChanges,
@@ -1327,7 +1355,7 @@ const app = createApp({
       toggleNetPrices, setVatRate, vatOptions, grossCents, vat, itemGross,
       availableModels, refreshModels, modelForecast, modelForecastLabel,
       HOME_RECEIPTS,
-      activePids, guestPersons,
+      activePids,
       summaryFor, copySummary, summaryToTSV, shiftMonth,
       toggleBooked, bookedLabel, unbookedCount,
       payerOf, payerName, setPayer,
@@ -1456,12 +1484,12 @@ ${receiptRow('state.receipts', true)}
           <button v-for="p in state.settings.persons" :key="p.id" class="chip chip-btn"
                   :class="{ active: payerOf(receipt) === p.id }" @click="setPayer(receipt, p.id)">{{ p.name }}</button>
         </div>
-        <div v-if="guestPersons().length" class="who-row guest-row">
+        <div v-if="state.settings.persons.length > 2 || !activePids().length" class="who-row guest-row">
           <span class="who-label">Dabei:</span>
           <button v-for="p in state.settings.persons" :key="p.id" class="chip chip-btn"
                   :class="{ active: activePids().includes(p.id), fixed: !p.optional }"
-                  :disabled="!p.optional" @click="toggleParticipant(p.id)">
-            <span v-if="p.optional && !activePids().includes(p.id)">+ </span>{{ p.name }}
+                  @click="toggleParticipant(p.id)">
+            <span v-if="!activePids().includes(p.id)">+ </span>{{ p.name }}
           </button>
         </div>
         <button v-if="receipt.attachmentCount" class="btn btn-ghost" @click="openOriginals(receipt)">
@@ -1719,7 +1747,11 @@ ${receiptRow('monthReceipts', false)}
       <div class="card acc" :class="{ open: state.settingsOpen.personen }">
         <button class="acc-head" @click="state.settingsOpen.personen = !state.settingsOpen.personen"><span v-html="ic('users', 20)"></span> Personen<span class="acc-arrow" v-html="ic('next', 16)"></span></button>
         <div class="acc-body" v-if="state.settingsOpen.personen">
-          <div v-for="p in state.settings.persons" :key="p.id" class="cat-row">
+          <div class="person-list">
+          <div v-for="p in state.settings.persons" :key="p.id" class="cat-row person-row" :data-id="p.id"
+               :class="{ dragging: state.dragId === p.id }">
+            <span class="rr-grip" title="Ziehen zum Umsortieren" aria-label="Ziehen zum Umsortieren"
+                  @pointerdown="startPersonDrag($event, p)" v-html="ic('grip', 18)"></span>
             <input v-model="p.name" @change="persistSettings">
             <button class="chip chip-btn who-toggle" :class="{ active: !p.optional }" @click="togglePersonFixed(p)"
                     :title="p.optional ? 'Gast — nur bei ausgewählten Bons dabei' : 'Immer dabei'">
@@ -1727,11 +1759,12 @@ ${receiptRow('monthReceipts', false)}
             </button>
             <button class="iconbtn small" @click="removePerson(p)" v-html="ic('trash', 16)" :disabled="state.settings.persons.length <= 2" aria-label="Person entfernen"></button>
           </div>
+          </div>
           <div class="cat-row">
             <input v-model="state.newPersonName" placeholder="Neue Person …" @keyup.enter="addPerson">
             <button class="iconbtn small accent" @click="addPerson" v-html="ic('plus', 18)" aria-label="Person hinzufügen"></button>
           </div>
-          <div class="hint"><b>Gast vs. immer:</b> „immer" heißt, die Person ist bei jedem neuen Bon dabei. Ein <b>Gast</b> taucht nirgends auf, bis du ihn an einem Bon über „Dabei:" dazuschaltest — so bläht eine selten beteiligte Person die Abrechnung nicht mit leeren Spalten auf. In der Monatsübersicht erscheint ein Gast nur in den Monaten, in denen er wirklich dabei war.</div>
+          <div class="hint"><b>Gast vs. immer:</b> „immer" heißt, die Person ist bei jedem neuen Bon von Anfang an dabei. Ein <b>Gast</b> taucht nirgends auf, bis du ihn an einem Bon über „Dabei:" dazuschaltest. Über „Dabei:" lässt sich an jedem Bon — auch an älteren — jede Person zu- oder abwählen. Die Reihenfolge hier (Griff links) ist die Spaltenreihenfolge in allen Tabellen — so bläht eine selten beteiligte Person die Abrechnung nicht mit leeren Spalten auf. In der Monatsübersicht erscheint ein Gast nur in den Monaten, in denen er wirklich dabei war.</div>
           <div class="hint">„teilen" heißt immer: exakt gleichmäßig auf ALLE am Bon Beteiligten. Pfand und Leergut werden ebenfalls auf alle gleichmäßig verteilt. Über den %-Knopf an jeder Position lässt sich jede Person einzeln prozentual beteiligen.</div>
         </div>
       </div>

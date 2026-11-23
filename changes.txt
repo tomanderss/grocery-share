@@ -1,0 +1,2 @@
+- Behoben: Eine später angelegte Person, die „immer" dabei ist, ließ sich an ältere Bons nicht anhängen. Über „Dabei:" lässt sich jetzt an jedem Bon jede Person zu- oder abwählen.
+- Neu: Die Reihenfolge der Personen lässt sich in den Einstellungen per Griff verschieben – sie bestimmt die Spaltenreihenfolge in allen Tabellen.
