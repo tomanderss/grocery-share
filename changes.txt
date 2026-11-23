@@ -1,1 +1,0 @@
-- Behoben: Der Prozent-Editor zeigte auch Gäste, die an dem Bon gar nicht beteiligt sind – jetzt erscheinen dort nur die Personen, die unter „Dabei:" aktiv sind.
