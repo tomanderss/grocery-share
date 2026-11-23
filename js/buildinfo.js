@@ -1,8 +1,15 @@
 // Auto-generiert von build.js — nicht manuell bearbeiten!
-export const BUILD      = '0.30';
-export const BUILD_HASH = '2a9beb6';
+export const BUILD      = '0.31';
+export const BUILD_HASH = '8c66686';
 
 export const CHANGELOG = [
+  {
+    "version": "0.31",
+    "date": "23.11.2026",
+    "changes": [
+      "- Behoben: Der Prozent-Editor zeigte auch Gäste, die an dem Bon gar nicht beteiligt sind – jetzt erscheinen dort nur die Personen, die unter „Dabei:\" aktiv sind."
+    ]
+  },
   {
     "version": "0.30",
     "date": "23.11.2026",
