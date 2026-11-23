@@ -191,6 +191,13 @@ function activePids() {
   return receiptPersonIds(currentReceipt(), state.settings);
 }
 
+// Personen-Objekte der Beteiligten (Reihenfolge wie in den Einstellungen) —
+// z.B. für den Prozent-Editor, der sonst auch nicht beteiligte Gäste zeigt.
+function activePersons() {
+  const pids = activePids();
+  return state.settings.persons.filter((p) => pids.includes(p.id));
+}
+
 function addItem() {
   const r = currentReceipt();
   if (!r) return;
@@ -1355,7 +1362,7 @@ const app = createApp({
       toggleNetPrices, setVatRate, vatOptions, grossCents, vat, itemGross,
       availableModels, refreshModels, modelForecast, modelForecastLabel,
       HOME_RECEIPTS,
-      activePids,
+      activePids, activePersons,
       summaryFor, copySummary, summaryToTSV, shiftMonth,
       toggleBooked, bookedLabel, unbookedCount,
       payerOf, payerName, setPayer,
@@ -1869,7 +1876,7 @@ ${receiptRow('monthReceipts', false)}
     <div v-if="state.splitEditor" class="modal-bg" @click.self="state.splitEditor = null">
       <div class="modal">
         <h3>Aufteilung in Prozent</h3>
-        <div v-for="p in state.settings.persons" :key="p.id" class="split-slider-row" :class="{ locked: state.splitEditor.locked[p.id] }">
+        <div v-for="p in activePersons()" :key="p.id" class="split-slider-row" :class="{ locked: state.splitEditor.locked[p.id] }">
           <div class="ssr-head">
             <span>{{ p.name }}</span>
             <span class="ssr-right">
@@ -1882,7 +1889,7 @@ ${receiptRow('monthReceipts', false)}
           <input type="range" min="0" max="100" step="5" :value="state.splitEditor.pcts[p.id]" :disabled="state.splitEditor.locked[p.id]" @input="onSplitSlider(p.id, $event)">
         </div>
         <div class="split-preview">
-          {{ state.settings.persons.filter((p) => editorResult()[p.id] > 0).map((p) => p.name + ' ' + editorResult()[p.id] + ' %').join(' / ') }}
+          {{ activePersons().filter((p) => editorResult()[p.id] > 0).map((p) => p.name + ' ' + editorResult()[p.id] + ' %').join(' / ') }}
           <div class="hint" style="margin-top:4px">Offene Regler gleichen sich automatisch ab — zusammen immer 100 %. Das Schloss friert einen Wert ein; der letzte offene Regler nimmt den Rest.</div>
         </div>
         <div class="modal-actions">

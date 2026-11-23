@@ -538,6 +538,21 @@ test.describe('Gäste', () => {
     await expect(page.locator('.split-btns button')).toHaveCount(5);
   });
 
+  test('%-Editor zeigt nur die am Bon Beteiligten, keine abwesenden Gäste', async ({ page }) => {
+    await gotoApp(page);
+    await addGuest(page);
+    await seedReceipt(page, { store: 'REWE', items: [item({ priceCents: 900, priceInput: '9,00' })] });
+    await page.locator('.split-btns button').last().click();
+    await expect(page.locator('.split-slider-row')).toHaveCount(2);
+    await expect(page.locator('.modal')).not.toContainText('Tjure');
+    await page.locator('.modal .btn-ghost').click();
+    // dazugeschaltet → erscheint auch im Editor
+    await page.locator('.who-row.guest-row .chip-btn', { hasText: 'Tjure' }).click();
+    await page.locator('.split-btns button').last().click();
+    await expect(page.locator('.split-slider-row')).toHaveCount(3);
+    await expect(page.locator('.modal')).toContainText('Tjure');
+  });
+
   test('später fest angelegte Person lässt sich an einen alten Bon hängen', async ({ page }) => {
     await gotoApp(page);
     // alter Bon: nur Tom & Tara beteiligt, schon abgeschlossen
